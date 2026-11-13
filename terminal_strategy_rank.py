@@ -8,7 +8,7 @@ from terminal_formula import evaluate_formula,FormulaError
 def strategy_rank(config,bars,code='',name=''):
     # Legacy saved strategies keep their explicit formula ordering.
     if config.get('ranking_mode','formula')=='formula':
-        return dict(rank=evaluate_formula(config['ranking'],bars,code=code),ranking_mode='formula')
+        return dict(rank=evaluate_formula(config['ranking'],bars,code=code,name=name),ranking_mode='formula')
     if len(bars)<35:raise FormulaError('综合评分日线不足35根，暂不参与排名')
     try:result=analyze(pd.DataFrame(bars),code,name,weights=(40,30,30))
     except (ValueError,KeyError,ArithmeticError) as exc:raise FormulaError('综合评分数据无效：'+str(exc)) from None

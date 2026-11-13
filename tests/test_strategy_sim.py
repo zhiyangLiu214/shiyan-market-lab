@@ -104,6 +104,12 @@ class EngineTests(unittest.TestCase):
         result=self.tick(True)
         self.assertFalse(result['enabled']);self.assertEqual(result['ledger']['accounts'],[])
         self.assertTrue(result['result']['items'][0]['matched'])
+    def test_selection_formula_receives_verified_daily_name(self):
+        item=self.store.create(dict(config(),formula="NAMELIKE('测试') AND C>MA(C,5)"),'live')
+        self.sid=item['id'];result=self.tick(True)
+        self.assertTrue(result['result']['items'][0]['matched'])
+        self.assertTrue(result['result']['items'][0]['data_ok'])
+
     def test_scheduled_buy_forward_fill_one_account_and_no_duplicate(self):
         self.toggle();a=self.tick()['ledger']['accounts'][0]
         self.assertEqual(len(a['orders']),1);self.assertEqual(a['trades'],[])

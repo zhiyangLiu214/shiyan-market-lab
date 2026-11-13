@@ -26,6 +26,18 @@ class CompatibilityTests(unittest.TestCase):
         with self.assertRaises(FormulaError):evaluate_formula("CODELIKE('6')",self.rows())
         for text in ["CODELIKE('__import__')","IF(1,'text',0)","CODELIKE(C)","CODELIKE('6',1)"]:
             with self.subTest(text=text),self.assertRaises(FormulaError):compile_formula(text)
+    def test_name_prefix_is_literal_and_st_rate_takes_priority(self):
+        formula="R:=IF(NAMELIKE('ST') OR NAMELIKE('*ST'),0.05,IF(CODELIKE('300'),0.2,0.1));NOT(C>=ZTPRICE(REF(C,1),R))"
+        rows=self.rows();rows[-1]['close']=10.7
+        self.assertEqual(evaluate_formula(formula,rows,code='600001',name='测试股票'),1)
+        for name in ['ST测试','*ST测试','st测试']:
+            self.assertEqual(evaluate_formula(formula,rows,code='300001',name=name),0)
+        self.assertEqual(evaluate_formula("NAMELIKE('*ST')",rows,code='600001',name='普通ST公司'),0)
+        for name in [None,'','600001']:
+            with self.assertRaises(FormulaError):evaluate_formula(formula,rows,code='600001',name=name)
+        for text in ["NAMELIKE(C)","NAMELIKE('ST',1)","NAMELIKE('')","NAMELIKE('ST;import os')"]:
+            with self.subTest(text=text),self.assertRaises(FormulaError):compile_formula(text)
+
     def test_doji_lookback_and_breakout_on_synthetic_rows(self):
         rows=self.rows();rows[-4].update(volume=10,open=10,close=10.01,high=10.5,low=9.5)
         rows[-1].update(open=10.5,close=11.2,high=11.3,low=10.4,volume=200)

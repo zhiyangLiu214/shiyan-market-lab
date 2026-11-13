@@ -29,6 +29,11 @@ class RankTests(unittest.TestCase):
             self.assertEqual(score['rank'],expected['score']);self.assertEqual(score['scores'],expected['scores']);self.assertEqual(score['score_weights'],[40,30,30]);self.assertEqual(score['ranking_mode'],'composite')
         self.assertLess(strategy_rank(config(),bars())['rank'],85)
         self.assertGreater(strategy_rank(config(),bars(True))['rank'],strategy_rank(config(),bars())['rank'])
+    def test_ranking_formula_receives_verified_name_context(self):
+        cfg=dict(ranking_mode='formula',ranking="IF(NAMELIKE('*ST'),0,C)")
+        self.assertEqual(strategy_rank(cfg,bars(),code='600001',name='*ST测试')['rank'],0)
+        self.assertEqual(strategy_rank(cfg,bars(),code='600001',name='普通测试')['rank'],bars()[-1]['close'])
+
     def test_missing_history_and_zero_volume_do_not_receive_default_score(self):
         with self.assertRaises(FormulaError):strategy_rank(config(),bars()[:10])
         data=bars();[row.update(volume=0) for row in data]

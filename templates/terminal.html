@@ -78,7 +78,7 @@
       <label>策略名称<input name="name" maxlength="60" required></label>
       <label>选股方法说明<textarea name="description" rows="2" maxlength="4000"></textarea></label>
       <label>执行公式<textarea name="formula" rows="5" maxlength="4000" required spellcheck="false"></textarea></label>
-      <p class="sim-help">支持通达信风格 C/O/H/L/V/AMOUNT，MA、EMA、SMA、REF、HHV、LLV、SUM、COUNT、EVERY、EXIST、CROSS、ABS、MAX、MIN、IF、BARSLAST、BARSCOUNT、CODELIKE、ZTPRICE。AND/OR组合，:=定义变量，最后一条为选股结果，最多64条语句，分号结尾的表达式可跨行。周期1–250；量为手、金额为元。中文方法由你提供后可转换为公式，说明文字不会自行执行；不支持的公式会报错，不会忽略。</p>
+      <p class="sim-help">支持通达信风格 C/O/H/L/V/AMOUNT，MA、EMA、SMA、REF、HHV、LLV、SUM、COUNT、EVERY、EXIST、CROSS、ABS、MAX、MIN、IF、BARSLAST、BARSCOUNT、CODELIKE、NAMELIKE、ZTPRICE。AND/OR组合，:=定义变量，最后一条为选股结果，最多64条语句，分号结尾的表达式可跨行。周期1–250；量为手、金额为元。中文方法由你提供后可转换为公式，说明文字不会自行执行；不支持的公式会报错，不会忽略。</p>
       <label>买入优先级<select name="ranking_mode"><option value="composite">综合评分从高到低（默认）</option><option value="formula">自定义排序公式</option></select><span class="sim-help">综合分100分：结构40%、趋势30%、量价动量30%。仅对公式入选股票排名；同分按代码，不额外设置85分门槛。评分不含主力资金，至少需要35根有效日线；盘中当日量未结束，得分随数据更新。</span></label>
       <label id="simRankingFormula">排序公式（结果从高到低）<input name="ranking" maxlength="4000" required></label>
       <label>选股范围<select name="pool"><option value="market">已选市场全部股票（后台完整扫描）</option><option value="custom">自定义股票池（最多50只）</option><option value="main">当前已确认主线/趋势角色候选</option><option value="scan">当前三维选股≥85分候选</option></select></label>
