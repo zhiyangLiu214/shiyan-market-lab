@@ -50,7 +50,30 @@ def sina_intraday_rows(payload):
              float(row['low']), float(row['volume'])/100] for row in values]
 
 
-def selection_bars(daily, intraday, day):
+def adjustment_basis(daily, day, actions=None):
+    if '_raw_lookup' not in daily:
+        daily['_raw_lookup'] = {row[0]:row for row in daily['raw']}
+        daily['_qfq_lookup'] = {row[0]:row for row in daily['qfq']}
+    raw = daily['_raw_lookup'][day]
+    adj = daily['_qfq_lookup'][day]
+    if actions is not None:
+        scale = 1.
+        anchor = daily['qfq'][-1][0]
+        for event in actions:
+            if event.get('category') == 1 and day < event['date'] <= anchor:
+                scale /= 1 + (event.get('songzhuangu') or 0)/10 + (event.get('peigu') or 0)/10
+    else:
+        width = float(raw[3])-float(raw[4])
+        if width <= 0:
+            raise ValueError('平价日线需要权益分派记录核验复权比例')
+        scale = (float(adj[3])-float(adj[4]))/width
+    offset = float(adj[2])-float(raw[2])*scale
+    if scale <= 0 or any(abs(float(raw[i])*scale+offset-float(adj[i]))>.003 for i in range(1,5)):
+        raise ValueError('前复权与原始价格无法核验为同一复权口径')
+    return scale, offset
+
+
+def selection_bars(daily, intraday, day, actions=None):
     raw = {row['date']: row for row in daily_rows(daily['raw'])}
     adjusted = daily_rows(daily['qfq'])
     current = next((bar for bar in adjusted if bar['date'] == day), None)
@@ -61,13 +84,14 @@ def selection_bars(daily, intraday, day):
         raise ValueError('14:30以前的30分钟K线不完整')
     if not current or day not in raw or raw[day]['close'] <= 0:
         raise ValueError('当日复权/实际价格缺失')
-    factor = current['close'] / raw[day]['close']
-    # Rebase the adjusted history to this historical day's nominal price scale.
-    # The close ratio is used only as a corporate-action scale, never as a signal.
-    history = [dict(row, **{key: row[key] / factor for key in ('open', 'high', 'low', 'close')})
+    scale, offset = adjustment_basis(daily, day, actions)
+    # Both share changes and cash dividends are affine price transformations.
+    history = [dict(row, **{key: (row[key]-offset) / scale for key in ('open', 'high', 'low', 'close')})
                for row in adjusted if row['date'] < day][-499:]
-    partial = dict(date=day, open=float(early[0][1]), close=float(early[-1][2]),
-                   high=max(float(row[3]) for row in early), low=min(float(row[4]) for row in early),
+    opening = raw[day]['open']  # Opening auction is known before 14:30.
+    partial = dict(date=day, open=opening, close=float(early[-1][2]),
+                   high=max(opening, max(float(row[3]) for row in early)),
+                   low=min(opening, min(float(row[4]) for row in early)),
                    volume=sum(float(row[5]) for row in early))
     if partial['volume'] > raw[day]['volume'] * 1.01:
         raise ValueError('盘中与日线成交量单位或来源不一致')
@@ -166,6 +190,27 @@ class HistoricalData:
                 errors.append(type(exc).__name__)
         raise ValueError('历史分笔不可用 ' + ','.join(errors))
 
+    def actions(self, code):
+        path = self.root/'actions'/(code+'.json')
+        if path.exists():
+            cached = json.loads(path.read_text())
+            if cached.get('retrieved_at','')[:10] >= self.end:
+                return cached['rows']
+        from pytdx.hq import TdxHq_API
+        for host, port in [('180.153.18.172',80),('60.191.117.167',7709)]:
+            try:
+                with TdxHq_API(raise_exception=True) as client:
+                    client.connect(host,port,time_out=4)
+                    rows = client.get_xdxr_info(int(code.startswith('6')),code)
+                    if rows is None:
+                        raise ValueError('权益分派响应缺失')
+                    rows = [dict(row,date=f"{row['year']:04}-{row['month']:02}-{row['day']:02}") for row in rows]
+                    write_json(path,dict(rows=rows,source='通达信权益分派记录',retrieved_at=clock()))
+                    return rows
+            except Exception:
+                pass
+        raise ValueError('权益分派记录不可用，无法核验跨期复权')
+
 
 def minute_points(tick_data, raw):
     ticks = [row for row in tick_data['rows'] if '09:25' <= row['time'] <= '15:00' and row['vol'] > 0]
@@ -204,6 +249,7 @@ def scan_stock(meta, strategies, data, dates):
     try:
         daily = data.daily(code)
         intraday = data.intraday(code)
+        actions = data.actions(code)
     except Exception as exc:
         return [], [dict(code=code, date=None, reason=str(exc)[:160])]
     raw = {row[0]: row for row in daily['raw']}
@@ -214,7 +260,7 @@ def scan_stock(meta, strategies, data, dates):
         if float(raw[day][5]) <= 0:
             continue
         try:
-            bars = selection_bars(daily, intraday, day)
+            bars = selection_bars(daily, intraday, day, actions)
         except ValueError as exc:
             errors.append(dict(code=code, date=day, reason=str(exc)))
             continue
@@ -259,11 +305,10 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
             quote = dict(date=day, prev_close=past[-1]['close'], daily={'bars': past}, sessions=sorted({bar['date'] for bar in rows if bar['date']<=day} | set(dates)))
             position['value'] = position['qty'] * today['close']
             # Daily corporate actions require explicit cash/share accounting.
-            adj = {row[0]: float(row[2]) for row in data.daily(code)['qfq']}
-            entry_raw = next(row for row in rows if row['date'] == position['opened'])
-            entry_scale = adj[position['opened']] / entry_raw['close']
-            current_scale = adj[day] / today['close']
-            if abs(current_scale/entry_scale-1) > .001:
+            actions = data.actions(code) if hasattr(data,'actions') else []
+            events = [e for e in actions if position['opened'] < e['date'] <= day and e.get('category')==1
+                      and any(e.get(k) for k in ('fenhong','songzhuangu','peigu'))]
+            if events:
                 errors.append(dict(date=day, code=code, reason='持有期发生复权因子变化，须补充权益分派后计算收益'))
                 break
             pending = position.get('pending_exit')
@@ -461,7 +506,7 @@ class BacktestStore:
             report['universe_note']='当前交易所名录及当前名称回溯，未重建历史退市名单和ST名称变更'
             report['assumptions']=[
                 '14:30由当日前7根30分钟K线构造未收盘日K，历史最多499根前复权日K',
-                '采用获取时点前复权序列，并按历史当日比例还原价格尺度，复权因子来源差异仍可能影响边界选股',
+                '以前复权序列及权益分派记录核验价格比例与现金分红平移，还原到历史当日价格尺度；来源差异仍可能影响边界选股',
                 '买入按收盘价，资金、排名、最多持仓和仓位上限按保存配置，收盘涨停不假定买入',
                 '卖出按历史分笔聚合的完整分钟信号，下一分钟价减0.05%滑点，成交量5%限制，T+1',
                 '分时均价由历史分笔成交量加权计算，分笔量与日线量核验，分钟内回封仍有粒度误差',

@@ -105,7 +105,7 @@ def pressure_plan(reference, stop, candidates, basis, date, period):
                 version=PLAN_VERSION)
 
 
-def analyze(frame, code, name='', board='', weights=(.4, .3, .3), demo=False):
+def analyze(frame, code, name='', board='', weights=(.4, .3, .3), demo=False, score_only=False):
     data = normalize_bars(frame)
     if len(data) < 35:
         raise ValueError('有效日线不足 35 根，暂不计算三维评分')
@@ -131,6 +131,13 @@ def analyze(frame, code, name='', board='', weights=(.4, .3, .3), demo=False):
     momentum_score = min(100, momentum_score)
     scores = [structure_score, round(trend_score, 1), momentum_score]
     score = round(sum(v * w for v, w in zip(scores, weights)), 1)
+    reasons = [f'收盘 {price:.2f}，前 20 日最高 {resistance:.2f}；' + ('已突破' if breakout else '尚未突破'),
+               f'近 5 日涨幅 {change5:+.2f}%，MA20 {ma[20]:.2f}',
+               ('均线多头排列' if alignment else '均线尚未多头排列') +
+               f'；MACD 柱 {hist.iloc[-1]:.3f}；量比 ' + (f'{volume_ratio:.2f}' if volume_ratio is not None else '未知')]
+    if score_only:
+        return dict(score=score,scores=scores,weights=weights,reasons=reasons,
+                    volume_ratio=round(volume_ratio,2) if volume_ratio is not None else None)
     pct = (price / float(previous.close) - 1) * 100
     total_volume = float(volumes.tail(5).sum())
     # AkShare daily volume is in lots, amount in CNY. Never fabricate VWAP when amount is missing.
@@ -159,10 +166,6 @@ def analyze(frame, code, name='', board='', weights=(.4, .3, .3), demo=False):
                      **{key: round(float(row[key]), 3) for key in ['open', 'close', 'high', 'low', 'volume']},
                      **{f'ma{n}': round(float(closes.rolling(n).mean().loc[i]), 3)
                         for n in (5, 10, 20) if pd.notna(closes.rolling(n).mean().loc[i])}})
-    reasons = [f'收盘 {price:.2f}，前 20 日最高 {resistance:.2f}；' + ('已突破' if breakout else '尚未突破'),
-               f'近 5 日涨幅 {change5:+.2f}%，MA20 {ma[20]:.2f}',
-               ('均线多头排列' if alignment else '均线尚未多头排列') +
-               f'；MACD 柱 {hist.iloc[-1]:.3f}；量比 ' + (f'{volume_ratio:.2f}' if volume_ratio is not None else '未知')]
     return {'code': code, 'name': name or code, 'board': board or '未提供板块',
             'price': round(price, 2), 'pct': round(pct, 2), 'date': latest.date.strftime('%Y-%m-%d'),
             'amplitude': round((float(latest.high) - float(latest.low)) / float(previous.close) * 100, 2),

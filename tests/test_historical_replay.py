@@ -112,6 +112,30 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(before[-1]['close'],10.5)
         self.assertEqual(before[0]['close'],10)
 
+    def test_cash_dividend_rebasing_is_affine_not_close_ratio(self):
+        daily,minutes,day=self.fixture()
+        daily['qfq']=[[r[0],*[float(x)-1 for x in r[1:5]],r[5]] for r in daily['raw']]
+        rows=selection_bars(daily,minutes,day,[])
+        self.assertEqual(rows[0]['close'],10)
+        self.assertEqual(rows[0]['high'],11)
+
+    def test_opening_auction_is_preserved_when_minute_source_starts_later(self):
+        daily,minutes,day=self.fixture()
+        daily['raw'][-1][1]=14
+        daily['qfq'][-1][1]=7
+        daily['raw'][-1][3]=14
+        daily['qfq'][-1][3]=7
+        rows=selection_bars(daily,minutes,day)
+        self.assertEqual(rows[-1]['open'],14)
+        self.assertEqual(rows[-1]['high'],14)
+
+    def test_flat_price_day_uses_verified_share_events(self):
+        daily,minutes,day=self.fixture()
+        daily['raw'][-1][1:5]=[10]*4
+        daily['qfq'][-1][1:5]=[9]*4
+        rows=selection_bars(daily,minutes,day,[])
+        self.assertEqual(rows[-1]['close'],10.5)
+
     def test_missing_or_duplicate_half_hour_is_not_filled(self):
         daily,minutes,day=self.fixture()
         with self.assertRaises(ValueError):selection_bars(daily,minutes[1:],day)

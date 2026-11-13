@@ -27,6 +27,7 @@ class RankTests(unittest.TestCase):
         for strong in [False,True]:
             data=bars(strong);score=strategy_rank(config(),data,'600001');expected=analyze(pd.DataFrame(data),'600001')
             self.assertEqual(score['rank'],expected['score']);self.assertEqual(score['scores'],expected['scores']);self.assertEqual(score['score_weights'],[40,30,30]);self.assertEqual(score['ranking_mode'],'composite')
+            self.assertEqual(score['score_reasons'],expected['reasons'])
         self.assertLess(strategy_rank(config(),bars())['rank'],85)
         self.assertGreater(strategy_rank(config(),bars(True))['rank'],strategy_rank(config(),bars())['rank'])
     def test_ranking_formula_receives_verified_name_context(self):
