@@ -15,6 +15,7 @@ from terminal_paper import PaperLedger,clock,session,lot,money,number
 from terminal_strategy_exit import exit_decision,PATTERNS
 from terminal_universe import BOARDS,in_boards
 from terminal_strategy_rank import strategy_rank
+from terminal_holding import holding_deadline
 
 EXAMPLE='MA5:=MA(C,5);\nMA20:=MA(C,20);\n选股:C>MA20 AND MA5>MA20 AND V>MA(V,5)*1.2;'
 
@@ -52,10 +53,11 @@ def checked_config(body):
         if key=='max_positions' and int(value)!=value:raise ValueError('持仓数量须为整数')
         values[key]=value
     if values['position_pct']>values['max_exposure']:raise ValueError('单股仓位不能超过总仓位')
+    if type(body.get('holding_limit',True)) is not bool:raise ValueError('最长持仓开关须为布尔值')
     patterns=body.get('exit_patterns',['vwap_cross'])
     if not isinstance(patterns,list) or any(p not in PATTERNS for p in patterns):raise ValueError('辅助卖出条件无效')
     return dict(name=name,description=description,formula=formula,ranking=ranking,ranking_mode=ranking_mode,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
-                **values,limit_up_trail=True,initial_cash=100000,scan_trigger_seconds=120)
+                **values,holding_limit=body.get('holding_limit',True),limit_up_trail=True,initial_cash=100000,scan_trigger_seconds=120)
 
 
 class StrategyStore:
@@ -141,9 +143,10 @@ def exit_lines(position,quote,config,previous=None):
 
 
 class StrategyEngine:
-    def __init__(self,store,reader,pool_reader,market_scan=None):
+    def __init__(self,store,reader,pool_reader,market_scan=None,calendar=None):
         self.store,self.reader,self.pool_reader=store,reader,pool_reader
         self.market_scan=market_scan
+        self.calendar=calendar
         self.guards={};self.check_threads={};self.thread=None;self.wakeup=threading.Event()
 
     def ensure(self):
@@ -174,6 +177,12 @@ class StrategyEngine:
                     db.execute('ATTACH DATABASE ? AS account_book', (str(self.store.book(sid).path),))
                     db.execute('UPDATE account_book.accounts SET cap=? WHERE mode=? AND id=?',
                                (config['max_exposure'], item['mode'], 'main'))
+                    if not config['holding_limit']:
+                        db.execute("UPDATE account_book.orders SET status='cancelled',result='最长持仓规则已关闭' WHERE mode=? AND side='sell' AND status='pending' AND source='auto' AND reason LIKE '最长持仓退出%'", (item['mode'],))
+                        for lot_row in db.execute('SELECT rowid,plan FROM account_book.lots WHERE mode=? AND qty>0', (item['mode'],)).fetchall():
+                            plan=json.loads(lot_row['plan'])
+                            plan.pop('_holding_exit_reason',None)
+                            db.execute('UPDATE account_book.lots SET plan=? WHERE rowid=?',(json.dumps(plan),lot_row['rowid']))
                     db.execute("UPDATE strategies SET config=?,result='{}',checked=NULL,status=? WHERE id=?",
                                (json.dumps(config, ensure_ascii=False), '规则已更新，等待下一次检查', sid))
                 if self.market_scan:
@@ -299,6 +308,7 @@ class StrategyEngine:
                     if self.store.get(sid)['enabled']:book.update(mode,{c:q for c,q in quotes.items() if q},clock(),buy_checks=checks)
                 account=book.snapshot(mode,clock())['accounts'][0]
                 pending={o['code'] for o in account['orders'] if o['status']=='pending'}
+                calendar=self.calendar(now[:10]) if self.calendar and account['positions'] and cfg.get('holding_limit',True) else []
                 for position in account['positions']:
                     q=quotes.get(position['code'])
                     if not q or not q['valid']:
@@ -316,7 +326,10 @@ class StrategyEngine:
                             if decision['sell'] and not position['available']:text+='；T+1暂不可卖，已记录待卖状态，尚未成交'
                             db.execute('INSERT OR IGNORE INTO notices VALUES(?,?,?,?,?,?,?,?,?)',(uuid.uuid4().hex,sid,mode,position['code'],position['name'],notice['kind'],q['date'],clock(),text))
                     holding_checks.append(dict(code=position['code'],name=position['name'],reason=decision['reason'],speed=decision['metrics']['speed'],stop=lines['stop'],target=lines['target'],available=position['available']))
-                    why=decision['reason'] if decision['sell'] else None
+                    deadline=holding_deadline(position,dict(q,sessions=calendar or q.get('sessions',[])),cfg.get('holding_limit',True))
+                    if deadline['sell']:book.mark_holding_exit(mode,'main',position['code'],deadline['reason'])
+                    holding_checks[-1].update(holding_days=deadline['days'],holding_reason=deadline['reason'])
+                    why=decision['reason'] if decision['sell'] else deadline['reason'] if deadline['sell'] else None
                     if why and position['code'] not in pending and session(clock()):
                         if not position['available']:reasons.append(position['name']+'触发退出但受T+1限制');continue
                         try:

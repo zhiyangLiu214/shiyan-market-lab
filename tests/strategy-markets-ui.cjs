@@ -3,7 +3,7 @@ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../static/strategy-sim.js'),'utf8');
 const boardNodes=['main','chinext','star'].map(value=>({value,checked:false}));
 const patternNodes=[{value:'vwap_cross',checked:false}];
-const elements=Object.fromEntries(['name','description','formula','ranking','ranking_mode','pool','codes','buy_time','take_profit','stop_loss','position_pct','max_exposure','max_positions'].map(k=>[k,{value:''}]));
+const elements=Object.fromEntries(['holding_limit','name','description','formula','ranking','ranking_mode','pool','codes','buy_time','take_profit','stop_loss','position_pct','max_exposure','max_positions'].map(k=>[k,{value:''}]));
 const form={elements,querySelectorAll(selector){const nodes=selector.includes('boards')?boardNodes:patternNodes;return selector.endsWith(':checked')?nodes.filter(n=>n.checked):nodes;}};
 const codeRow={},rankingRow={};const context={$:id=>id==='simForm'?form:id==='simRankingFormula'?rankingRow:codeRow,esc:s=>String(s).replaceAll('<','&lt;'),fmt:x=>String(x)};
 vm.createContext(context);vm.runInContext(source,context);
@@ -16,3 +16,5 @@ console.log('市场范围界面：默认三市场、勾选保存、历史策略�
 
 const scoreHtml=context.simScoreEvidence({ranking_mode:'composite',scores:[85,75,100],score_version:'daily-v1.0',score_reasons:['<突破>']});assert.match(scoreHtml,/结构 85/);assert.match(scoreHtml,/趋势 75/);assert.match(scoreHtml,/量价 100/);assert.match(scoreHtml,/&lt;突破>/);
 assert.equal(context.simScoreEvidence({ranking_mode:'formula'}),'');
+
+context.simFill({holding_limit:false});assert.equal(context.simConfig().holding_limit,false);context.simFill({});assert.equal(context.simConfig().holding_limit,true);

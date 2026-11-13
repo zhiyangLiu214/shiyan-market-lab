@@ -1,0 +1,18 @@
+.backtest-form{padding:20px;display:flex;flex-wrap:wrap;align-items:end;gap:16px}
+.backtest-form label,.backtest-history label{display:flex;flex-direction:column;gap:8px}
+.backtest-form fieldset{display:flex;gap:16px;flex-wrap:wrap;border:1px solid var(--line);padding:10px 14px}
+.backtest-form fieldset label{flex-direction:row;align-items:center}
+.backtest-form p{width:100%;margin:0;color:var(--muted)}
+.backtest-history{padding:16px;margin:14px 0;display:flex;gap:16px;align-items:end}
+.backtest-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:16px}
+.backtest-card{padding:20px;min-width:0}
+.backtest-return{font-size:36px;font-weight:600;margin:12px 0}
+.backtest-card .sim-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+.backtest-card details{border-top:1px solid var(--line);padding:12px 0}
+.backtest-card summary{cursor:pointer;color:var(--gold)}
+.backtest-trade{padding:10px 0;border-bottom:1px solid var(--line)}
+.backtest-trade p{margin:5px 0;color:var(--muted)}
+.backtest-scroll{max-height:480px;overflow:auto}
+.backtest-notice{padding:18px}
+.backtest-notice p{color:var(--muted);line-height:1.7}
+@media(max-width:1100px){.backtest-columns{grid-template-columns:1fr}.backtest-form{align-items:stretch}.backtest-form fieldset{width:100%}}

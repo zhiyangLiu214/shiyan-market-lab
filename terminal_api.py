@@ -32,6 +32,9 @@ from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_hi
 from terminal_engine import normalize_bars
 
 
+from terminal_holding import TradingSessions
+from terminal_backtest import BacktestStore
+
 def register_terminal(app, load_boards, load_board_stocks):
     bp = Blueprint('terminal', __name__)
     lock = threading.Lock()
@@ -334,8 +337,9 @@ def register_terminal(app, load_boards, load_board_stocks):
                 threading.Thread(target=run_scan,args=(job_id,demo,weights,options),daemon=True).start()
             return {'items':list(latest['results']),'as_of':latest['finished_at'],'complete':not latest.get('errors'),'reason':'；'.join(latest.get('errors',[])) or latest.get('reason','本轮暂无85分以上候选')} if fresh else None
 
+    trading_sessions=TradingSessions()
     paper_ledger = PaperLedger(Path(app.root_path)/'.runtime'/'paper-trading.sqlite3')
-    paper = PaperRunner(paper_ledger,market,paper_scan,paper_detail,get_minute)
+    paper = PaperRunner(paper_ledger,market,paper_scan,paper_detail,get_minute,calendar=trading_sessions.load)
 
     @bp.get('/api/terminal/paper')
     def paper_state():
@@ -353,6 +357,7 @@ def register_terminal(app, load_boards, load_board_stocks):
             elif action=='toggle':
                 if not isinstance(body.get('enabled'),bool): raise ValueError('运行状态无效')
                 paper_ledger.toggle(mode,body['enabled'])
+            elif action=='holding_limit': paper_ledger.set_holding_limit(mode,body.get('account'),body.get('enabled'))
             elif action=='cap': paper_ledger.set_cap(mode,body.get('account'),body.get('cap'))
             elif action=='cancel': paper_ledger.cancel(mode,str(body.get('id','')))
             elif action=='order':
@@ -428,7 +433,7 @@ def register_terminal(app, load_boards, load_board_stocks):
     def strategy_daily(code,mode,meta):
         return strategy_formula_daily(code)
     strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily)
-    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan)
+    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load)
 
     @bp.get('/api/terminal/strategy-sim')
     def strategy_state():
@@ -466,6 +471,27 @@ def register_terminal(app, load_boards, load_board_stocks):
             return jsonify(ok=True,data=data)
         except (ValueError,TypeError,KeyError) as exc:return jsonify(ok=False,error=str(exc)),400
         except Exception:return jsonify(ok=False,error='本轮策略检查失败；未补造委托或成交，请检查行情后重试'),503
+
+    backtests = BacktestStore(Path(app.root_path)/'.runtime'/'backtests', strategy_store)
+
+    @bp.get('/api/terminal/backtests')
+    def backtest_state():
+        try:
+            run_id = request.args.get('id')
+            return jsonify(ok=True, data=backtests.get(run_id) if run_id else dict(items=backtests.list()))
+        except (ValueError, FileNotFoundError):
+            return jsonify(ok=False, error='回溯记录不存在'), 404
+
+    @bp.post('/api/terminal/backtests')
+    def backtest_start():
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify(ok=False, error='回溯参数无效'), 400
+        try:
+            report = backtests.start(body.get('ids'), body.get('start'), body.get('end'))
+            return jsonify(ok=True, data=report)
+        except (ValueError, KeyError) as exc:
+            return jsonify(ok=False, error=str(exc)), 400
 
     notes = NoteStore(Path(app.root_path)/'.runtime'/'yeren-notes.sqlite3',
                       Path(app.root_path)/'research'/'yeren_tech_catalog.json')
