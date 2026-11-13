@@ -1,0 +1,15 @@
+[Unit]
+Description=A Share Sector Dashboard
+After=network.target
+
+[Service]
+WorkingDirectory=/app
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/app/.venv/bin/gunicorn -w 1 --threads 8 --timeout 120 -b 127.0.0.1:8766 app:app
+Restart=always
+RestartSec=5
+User=shiyan
+Group=shiyan
+
+[Install]
+WantedBy=multi-user.target

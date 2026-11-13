@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#10151c">
+<title>势研 · A股研究终端</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="{{ url_for('static', filename='terminal.css', v='paper-health-20261113') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='pressure.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='mainline.css') }}">
+<script defer src="{{ url_for('static', filename='realtime.js') }}"></script>
+<script defer src="{{ url_for('static', filename='research.js') }}"></script>
+<script defer src="{{ url_for('static', filename='pressure.js') }}"></script>
+<script defer src="{{ url_for('static', filename='mainline.js', v='authorized-20261113') }}"></script>
+<link rel="stylesheet" href="/static/notes.css">
+<script defer src="/static/notes.js"></script>
+<script defer src="/static/paper.js?v=entry-reasons-20261113"></script>
+<script defer src="/static/alerts.js"></script>
+<script defer src="/static/alerts-ui.js"></script>
+<script defer src="{{ url_for('static', filename='terminal.js', v='authorized-20261113') }}"></script>
+<script defer src="/static/sources.js?v=authorized-sources-20261113"></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="势研首页"><span class="brand-mark">ϟ</span><span>势研<span class="brand-en">MARKET LAB</span></span></a>
+  <nav aria-label="主导航">
+    <button data-page="main" class="nav active"><span>◈</span> 今日主线</button>
+    <button data-page="strategy" class="nav"><span>⌘</span> 策略解读</button>
+    <button data-page="watch" class="nav"><span>☆</span> 自选监控 <small id="watchCount">0</small></button>
+    <button data-page="scan" class="nav"><span>▦</span> 三维选股</button>
+    <button data-page="notes" class="nav"><span>▤</span> 野人笔记</button>
+    <button data-page="paper" class="nav"><span>⇄</span> 模拟交易</button>
+  </nav>
+  <div class="connection"><i id="statusDot"></i><span id="modeLabel">行情模式</span><span class="version">V 0.4</span></div>
+</header>
+<div class="workspace-bar">
+  <div><span class="eyebrow">A-SHARE RESEARCH</span><span class="bar-date" id="clock"></span></div>
+  <div class="bar-actions"><label for="refreshInterval">自动刷新</label><select id="refreshInterval" aria-label="自动刷新间隔"><option value="30">30 秒</option><option value="60">60 秒</option><option value="0">暂停</option></select><label for="mode">数据模式</label><select id="mode"><option value="live">行情接口</option><option value="demo">演示样本</option></select><a href="/legacy" target="_blank" rel="noopener">旧版看板 ↗</a></div>
+</div>
+<div id="demoBanner" class="demo-banner" hidden>演示模式 · 所有行情、股票名称及图表均为合成样本，用于体验功能，不代表真实市场。</div>
+<main>
+  <section class="page-heading"><div><div class="eyebrow" id="pageEyebrow">MARKET OVERVIEW</div><h1 id="pageTitle">把握市场的<span>主线脉络</span></h1><p id="pageSubtitle">先判断主线与阶段，再观察龙头、趋势龙与补涨角色。</p></div><div class="heading-actions"><span id="updated">等待行情</span><button class="button" id="refresh">↻ 刷新行情</button></div></section>
+  <div class="realtime-status"><span id="autoStatus" role="status" aria-live="off">自动刷新已开启</span><span>行情与资金轮询更新；资金为交易日累计，非分钟增量</span></div>
+  <details id="sourceControls" class="panel" style="padding:12px 18px;margin-bottom:16px">
+    <summary>行情来源与自动备用切换</summary>
+    <div class="bar-actions" style="margin-top:12px;flex-wrap:wrap">
+      <label>价格 / K线优先 <select id="quoteSource"><option value="auto">自动：东方财富 → 腾讯 → 已配置扩展源 → 通达信</option><option value="em">东方财富优先</option><option value="tencent">腾讯优先</option><option value="tushare" disabled>Tushare优先（需配置权限）</option><option value="tdx">通达信普通行情优先</option></select></label>
+      <label>板块资金优先 <select id="fundSource"><option value="auto">自动：东方财富 → 短线侠 → 同花顺</option><option value="em">东方财富优先</option><option value="dxx">短线侠资金观察优先</option><option value="ths">同花顺资金观察优先</option></select></label>
+      <button class="button" id="saveSources">保存优先级</button>
+    </div>
+    <p class="muted">首选不可用时自动尝试其他来源；来源切换失败冷却120秒，东方财富资金通道另按30至300秒逐步退避，期满后下次请求自动复检。设置保存在服务器，两个模拟账户共用。资金分类及口径不混用；未核验日期或主力口径的备用资金只供观察。通达信普通行情不代表已取得App中的主力净额。短线侠当日板块主力净额已接通；多日及个股资金仍待接入。</p>
+    <p class="muted">Tushare需另行配置账号权限，未配置时不参与切换。盘中日线与实时分钟权限分别核验；资金历史为盘后数据，仅补充已完成交易日，不能代替今日资金。QMT／迅投须先确认客户端和数据权限。</p>
+    <div id="sourceHealth" role="status" class="muted"></div>
+  </details>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <section id="mainPage" class="page"><div id="marketContent"><div class="empty loading">正在连接行业行情…</div></div></section>
+  <section id="strategyPage" class="page" hidden><div id="strategyContent"></div></section>
+  <section id="watchPage" class="page" hidden>
+    <div class="panel alert-toolbar"><div><b>自动策略提醒</b><p>未填成本：观察试仓条件、压力与支撑。已填成本：按持仓状态观察加仓、减仓、止盈与止损；无需手工配置提醒规则。</p><small id="alertMonitorStatus">网页处于前台且自动刷新开启时，轮询全部自选。以最新可用分钟收盘确认，关闭网页后不推送。</small><details class="alert-method"><summary>自动提醒依据</summary><p>试仓观察：当前龙头/趋势/补涨候选，个股与板块同日主力净额及占比为正，最近两分钟有弱转强或均价承接，现价不低于均价，剩余盈亏比≥1.5，且当前计划未触及失效或目标。加仓观察还需已填成本且当前有浮盈。减仓观察：跌破支撑，或连续两根分钟收盘低于均价且同日主力净额为负。触及压力且高于成本提示止盈；跌破技术失效价且低于成本提示止损，高于成本则提示利润保护。</p><p>填成本仅作为本机持仓标记，未连接券商、未掌握数量和可用仓位。持仓参考价在记录成本时固定，修改成本后重新生成；超过7个自然日的计划暂停判断，保存成本时会重新核对。成本留空不推送加减仓、止盈止损。缺失或过期数据不生成对应条件。每股同一状态、同类条件每日最多提醒一次。提醒属于规则观察，尚未回测验证，不执行交易。</p></details></div><button class="button" id="openAlertHistory">提醒记录</button></div>
+    <div class="split"><aside class="panel watch-panel"><div class="panel-title"><h2>我的观察池</h2><span class="muted">本机保存</span></div><form id="addForm" class="add-form"><input id="stockCode" type="search" role="combobox" aria-label="股票名称或代码" aria-autocomplete="list" aria-controls="stockSearchList" aria-expanded="false" placeholder="名称或代码，如 贵州茅台" maxlength="40" autocomplete="off"><button class="button gold" type="submit">＋ 添加</button></form><div id="stockSearch" class="stock-search" hidden><div id="stockSearchStatus" role="status" aria-live="polite"></div><div id="stockSearchList" role="listbox" aria-label="匹配的股票"></div></div><div id="watchList"></div></aside><div id="watchDetail" class="detail-panel"><div class="empty">选择左侧股票，查看日线与因子分析</div></div></div>
+  </section>
+  <section id="scanPage" class="page" hidden>
+    <div class="panel scan-controls"><div><h2>多因子扫描 <span class="badge">综合分 ≥85</span></h2><p>独立板块共振检验 → 三维评分 → 仅保留85分及以上</p></div><button class="button" id="toggleWeights" aria-expanded="false">⚙ 因子权重</button><button class="button gold" id="startScan">开始扫描 ↗</button></div>
+    <div class="panel gate-controls"><label>板块涨幅 ≥ <input id="minBoardPct" aria-label="板块涨幅门槛" type="number" min="0" max="15" step="0.5" value="2"> %</label><label>基础动量达标 ≥ <select id="minCompanies" aria-label="板块达标家数"><option>5</option><option>6</option><option>7</option><option>8</option></select> 家</label><p>基础动量：MA5 &gt; MA10 &gt; MA20、MACD 红柱、量比 ≥1.2；先过门槛再排名。</p></div>
+    <div id="boardChecks"></div>
+    <div id="weightsPanel" class="panel weights" hidden><div id="weightInputs"></div><p>综合分 = 三项因子得分 × 归一化权重。修改后重新扫描生效。</p></div>
+    <div class="scan-progress" id="scanProgress" role="status"></div>
+    <div class="split"><aside class="panel"><div class="panel-title"><h2>因子排行榜</h2><span class="muted" id="scanCount">尚未扫描</span></div><div id="scanList"><div class="empty compact">点击「开始扫描」生成候选榜单</div></div></aside><div id="scanDetail" class="detail-panel"><div class="empty">让每一项评分，都有据可查。<small>结构突破 / 趋势强度 / 量价动量</small></div></div></div>
+  </section>
+  <section id="paperPage" class="page" hidden><div class="panel paper-toolbar"><div><h2>双账户同步对照</h2><p id="paperRunStatus">等待账本</p></div><button class="button gold" id="paperStart">同时启动两个10万元账户</button><button class="button" id="paperToggle" hidden>暂停自动策略</button></div><p id="paperError" role="status"></p><details class="panel paper-method"><summary>查看模拟执行规则与数据范围</summary><p>两个账户独立，各初始10万元、最多5只，默认仓位上限70%（可单独调整并记录）。涨价可能导致被动超限，系统在可卖时回收风险，T+1可能暂时阻止减仓。今日主线账户只从主线候选池买入；三维账户只从独立扫描综合分≥85的池买入，固定40/30/30权重、板块涨幅≥2%、基础动量≥5只，不跟随页面临时权重变化。</p><p>相同执行规则：首次试仓约净资产10%，浮盈后加仓约5%，自动买入后单股不超过20%；近期弱转强或均价承接、价格在均价上方、同日主力净额与占比为正、当前日线计划未触及目标/止损且剩余盈亏比≥1.5。技术失效退出；首压力仅首次减半止盈，第二压力退出剩余持仓；两根分钟低于均价且同日主力净流出则减半。持仓计划在首次买入委托时固定；同一分时信号不重复加仓。市场未给机会时允许空仓。</p><p>筛选池动态更新：待买单成交前复核池内资格、资金、信号与盈亏比；完整快照确认退出池后撤销待买单。行情或扫描不完整时暂停判断，不当作离池。持仓仅排名变化不卖出；连续3次完整快照离池、跨度≥2分钟，且价格与资金转弱、账户名额或资金受限、新候选符合入场条件且剩余盈亏比≥2时，每轮最多选择一只腾仓。先卖出实际模拟成交，才释放名额及资金；新股届时重新验证。候选优先满足执行条件、未持有及剩余空间，卖出后30分钟不自动重买。</p><p>信号产生后提交委托，只用后续轮询首次观察到的新完整分钟价模拟；不回填漏掉的成交。估值与策略约30秒轮询，分钟源可能延迟。连续竞价模拟时段9:31–11:30、13:01–14:57，排除集合竞价与盘后。T+1，普通A股买入100股整数倍，科创板最低200股；每笔数量不超过该分钟成交量5%，触及涨停不假定可买、跌停不假定可卖。无深度委托队列，不模拟真实撮合；不足10根日线、ST和北交所暂不参与。</p><p>费用假设：佣金万2.5、单笔最低5元；过户费成交额万0.1，双向；卖出印花税万5；买卖各按5个基点不利滑点计价，费用含入持仓成本。为统一对照假设，不等于你的券商账单。未模拟分红、送转、除权与停牌后的资产调整，相关标的需单独核对。最大回撤按权益采样计算，卖出单胜率按卖出成交统计。</p><p>这是从启动时刻起的前向模拟，非真实证券交易，也不是历史回测；后台依赖本机服务运行、电脑不休眠。手动委托会计入该账户总收益，并在记录中标识；比较策略时需注意人工干预差异。暂停自动策略时自动买单暂停成交，已有卖单及手动单继续复核；不自动撤单，可在委托列表单独撤销。</p></details><div id="paperContent"></div></section>
+  <section id="notesPage" class="page" hidden>
+    <div class="panel notes-overview"><div><b>全能的野人 · 聊技术</b><p id="notesProgress">正在读取笔记…</p></div><a class="button" href="https://www.douyin.com/collection/7526865577185380404/1" target="_blank" rel="noopener noreferrer">原合集 ↗</a><button class="button" id="notesReload">重新载入</button><button class="button gold" id="notesNew">＋ 写笔记</button></div>
+    <p id="notesMessage" role="status" aria-live="polite"></p>
+    <div class="notes-workspace"><aside class="panel notes-sidebar" aria-label="笔记目录"><input id="notesSearch" type="search" placeholder="搜索标题、干货、标签" aria-label="搜索笔记"><div class="notes-filters"><select id="notesCategory" aria-label="分类筛选"><option value="">全部分类</option></select><select id="notesStatus" aria-label="核验状态筛选"><option value="">全部状态</option></select></div><label class="notes-archive-filter"><input type="checkbox" id="notesArchived"> 查看已归档</label><div id="notesList" class="notes-list"></div></aside>
+    <article class="panel notes-editor"><div class="notes-editor-head"><b id="notesEditorTitle">选择或新建一条笔记</b><span id="notesDirty"></span></div>
+    <form id="notesForm" hidden><label>标题<input name="title" required maxlength="300" placeholder="给这条干货起个标题"></label><div class="notes-form-row"><label>分类<select name="category"></select></label><label>核验状态<select name="verification"></select></label></div>
+    <p class="notes-source-hint" id="notesSourceHint"></p>
+    <label>内容要点<textarea name="summary" rows="4" maxlength="12000" placeholder="提炼原视频观点；自己的理解请注明。目录标题不等于已读内容。"></textarea></label>
+    <div class="notes-form-row"><label>适用条件<textarea name="conditions" rows="3" maxlength="6000" placeholder="什么市场阶段、什么信号下适用"></textarea></label><label>操作关键<textarea name="actions" rows="3" maxlength="6000" placeholder="观察、试仓、加减仓等具体条件与顺序"></textarea></label></div>
+    <details class="notes-extra"><summary>补充失效条件与易错点</summary><div class="notes-form-row"><label>失效条件<textarea name="invalidation" rows="3" maxlength="6000"></textarea></label><label>易错点 / 待核验<textarea name="risk" rows="3" maxlength="6000"></textarea></label></div></details>
+    <label>视频来源链接<div class="notes-source-row"><input name="source_url" type="url" maxlength="2048" placeholder="https://www.douyin.com/…"><a id="notesSource" class="button" target="_blank" rel="noopener noreferrer" hidden>原视频 ↗</a></div></label><div class="notes-form-row"><label>对应时间段<input name="time_range" maxlength="100" placeholder="例如 00:35–01:20"></label><label>标签<input name="tags" maxlength="1000" placeholder="例如 二次回踩、仓位、盈亏比"></label></div>
+    <div class="notes-savebar"><span id="notesSavedAt"></span><button type="button" class="button" id="notesArchive" hidden>归档</button><button class="button gold" type="submit" id="notesSave">保存笔记</button></div></form>
+    </article></div><p class="notes-footnote">目录待提取：仅有标题，正文未获取。转写待核验：可能存在识别错误。原声已核对：由整理者核验后标记。笔记独立保存，不自动修改选股与模拟交易规则。</p>
+  </section>
+</main>
+<footer><span><i class="live-dot"></i> 势研 · 可解释的市场研究</span><span>规则版本 daily-v1.0 · 价格计划 pressure-v1.0 · 信号仅供研究，未经收益验证</span><button class="text-button" id="showRules">评分规则 ↗</button></footer>
+<dialog id="rulesDialog"><div class="dialog-head"><h2>评分规则与数据口径</h2><button class="icon-button" id="closeRules" aria-label="关闭规则说明">×</button></div><p>结构突破是前 20 日区间的近似模型；趋势强度由近 5 日涨幅与 MA20 位置构成；量价动量使用均线排列、MACD 柱与相对前 5 日均量。</p><ol><li>结构：突破前 20 日最高价得 85 分；否则站上 MA20 得 65 分；其余 30 分。</li><li>趋势：40 + 近 5 日涨幅 × 2.5 + 站上 MA20 加 20 分，限制在 0～100 分。</li><li>动量：多头均线 40 分（否则 10）；MACD 红柱 30 分；量比 ≥1.2 加 30 分（否则 10）。</li></ol><p>价格计划使用末根日线收盘价，止损约为参考价下方 3%～8%，目标优先取上方历史压力区域下沿，盈亏比按目标反算；2R、3R 推算价单独列示，不替代压力位。压力候选来自前 20/60/120 个交易日高点及左右各两根确认的摆动高点，排除末根日线；相邻价差不超过参考价的 0.3% 时合并。首压力盈亏比低于 1.5 时标注空间不足，该阈值只是展示规则。分钟压力仅使用首个信号之前已出现的高点。它是研究用计算规则，不代表建议成交价格。</p><p>分钟信号按分钟收盘确认，均量仅使用前5根，同一分钟可有多种信号；当日未收盘数据可能变化。不复权日线可能受到除权影响。分时信号包括放量上攻、上穿均价、均价附近承接及弱转强（本工具因果近似），均为本工具公开规则。三维扫描独立于今日主线，最多取 8 个涨幅达标行业、各前 20 只成分，样本内基础动量达标家数满足门槛后才进入排名。当前未实现严格缠论、艾略特浪型识别、逐笔资金、集合竞价或离线通知推送。</p></dialog>
+<dialog id="alertEditor"><form><div class="dialog-head"><h2 id="alertEditorTitle">持仓成本</h2><button type="button" class="icon-button" id="closeAlertEditor" aria-label="关闭成本设置">×</button></div><div class="alert-editor-top"><label>成本价（选填）<input type="number" id="alertCost" min="0.001" step="0.001" placeholder="留空作为未持仓观察"></label></div><p>填写成本后，系统按持仓状态解读，结合技术失效位、压力位、资金与分时信号生成加仓、减仓、止盈止损观察提醒；留空则关注试仓条件及压力、支撑变化。</p><p class="muted">成本仅保存在此浏览器，不提交到行情源。填写成本不代表已连接真实证券持仓；没有数量和可用仓位时，提醒不会给出具体交易数量。</p><p id="alertEditorError" role="status"></p><button type="submit" class="button gold" id="saveAlertCost">保存成本</button></form></dialog>
+<dialog id="alertHistoryDialog"><div class="dialog-head"><h2>策略提醒记录 · 最近100条</h2><button class="icon-button" id="closeAlertHistory" aria-label="关闭提醒记录">×</button></div><div id="alertHistoryList"></div></dialog>
+<aside id="priceNotice" class="price-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b>策略观察条件已触发</b><button class="icon-button" id="dismissPriceNotice" aria-label="关闭价格提醒">×</button></div><div id="priceNoticeList"></div></aside>
+<div id="toast" role="status" aria-live="polite"></div>
+</body></html>

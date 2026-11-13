@@ -1,0 +1,48 @@
+# Private runtime state, credentials, and local Python environments
+.runtime/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.netrc
+*.netrc
+*.key
+*.pem
+*.p12
+*.pfx
+*.har
+*.log
+*.pid
+*.sqlite*
+*.db
+*.db-*
+.DS_Store
+.coverage
+htmlcov/
+
+# Private research captures, transcripts, media, and deployment records
+/docs/*
+!/docs/development.md
+!/docs/DEPLOYMENT.md
+/research/*
+!/research/data-source-setup.md
+!/research/yeren_tech_catalog.json
+*.mp3
+*.mp4
+*.m4a
+*.wav
+*.source
+*.tar.gz
+*.zip
+
+# Legacy indicator drafts are kept locally, outside the website source tree
+/*.txt
+!/requirements.txt
+
+# Local editor settings
+.idea/
+.vscode/

@@ -1,0 +1,25 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync('static/terminal.js', 'utf8');
+const context = vm.createContext({});
+vm.runInContext(source.slice(source.indexOf('const esc ='), source.indexOf('const factorNames =')), context);
+vm.runInContext(fs.readFileSync('static/pressure.js','utf8'), context);
+vm.runInContext(source.slice(source.indexOf('function chartSVG('),source.indexOf('function bindChart(')),context);
+const plan={period:'日线',reference:10,stop:9.5,target1:null,target2:null,rr:null,rr2:null,upside:null,
+  levels:[],assessment:'暂无明确上方压力位',target_basis:'历史高点',rr_target1:11,rr_target2:11.5};
+context.plan=plan;
+let html=vm.runInContext('pressureHTML(plan)',context);
+assert.match(html,/暂无明确上方压力位/);
+assert.match(html,/盈亏比推算价（非压力位）/);
+assert.doesNotMatch(html,/0.00:1/);
+context.stock={name:'测试',plan,bars:Array.from({length:30},(_,i)=>({date:'2026-11-01',open:10,close:10,high:10.2,low:9.8,volume:10}))};
+const chart=vm.runInContext('chartSVG(stock)',context);
+assert.doesNotMatch(chart,/NaN|Infinity|首压力/);
+assert.match(chart,/止损 9.50/);
+plan.levels=[{price:10.3,high:10.32,basis:'前高',date:'2026-11-09'}];
+plan.rr=.6;plan.upside=3;
+html=vm.runInContext('pressureHTML(plan)',context);
+assert.match(html,/10.30–10.32/);
+assert.match(html,/class="num risk-low">0.60:1/);
+console.log('Pressure display: zones, low ratio, missing targets and chart null handling passed.');
