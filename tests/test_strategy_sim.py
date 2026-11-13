@@ -12,7 +12,7 @@ DAY='2026-11-11'
 
 
 def config(**kw):
-    return dict(name='测试策略',formula='C>MA(C,5)',ranking='C/REF(C,1)-1',pool='custom',codes=['600001'],**kw)
+    return dict(name='测试策略',formula='C>MA(C,5)',ranking='C/REF(C,1)-1',ranking_mode='formula',pool='custom',codes=['600001'],**kw)
 
 
 def bars(day=DAY):

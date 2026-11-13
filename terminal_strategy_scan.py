@@ -7,6 +7,7 @@ from datetime import datetime
 from terminal_formula import evaluate_formula,FormulaError
 from terminal_paper import clock
 from terminal_universe import BOARDS
+from terminal_strategy_rank import strategy_rank
 
 
 class StrategyMarketScan:
@@ -35,7 +36,7 @@ class StrategyMarketScan:
         if not job:return dict(ready=False,items=[],reason='市场扫描尚未开始')
         ready=job['status']=='complete' and job['failed']==0 and job['day']==clock()[:10]
         # All matches remain visible; only the top 50 are requoted for execution.
-        matches=sorted([r for r in job['rows'] if r.get('matched')],key=lambda r:(-r['rank'],r['code']))
+        matches=sorted([r for r in job['rows'] if r.get('matched') and r.get('data_ok')],key=lambda r:(-r['rank'],r['code']))
         return dict(ready=ready,items=matches[:50] if ready else [],reason=job['reason'],market_scan=job)
 
     def _run(self,item):
@@ -49,7 +50,8 @@ class StrategyMarketScan:
                     quote=self.reader(meta['code'],item['mode'],meta)
                     bars=quote['bars'];row.update(source=quote.get('source'),as_of=quote.get('as_of'))
                     if not bars or bars[-1]['date']!=day:raise ValueError('缺少扫描当日的日线快照')
-                    row['matched']=bool(evaluate_formula(cfg['formula'],bars));row['rank']=evaluate_formula(cfg['ranking'],bars)
+                    row['matched']=bool(evaluate_formula(cfg['formula'],bars))
+                    if row['matched']:row.update(strategy_rank(cfg,bars,meta['code'],meta['name']))
                     row.update(data_ok=True,reason='公式入选' if row['matched'] else '公式不满足')
                 except FormulaError as exc:
                     # Insufficient listing history is an explicit exclusion,
@@ -65,7 +67,7 @@ class StrategyMarketScan:
                         job=self.jobs[sid];job['rows']=job['rows']+[row];job['done']+=1;job['checked']=clock()
                         if row.get('excluded'):job['excluded']+=1
                         elif not row['data_ok']:job['failed']+=1
-                        if row['matched']:job['matched']+=1
+                        if row['matched'] and row['data_ok']:job['matched']+=1
                         job['reason']=f"市场扫描 {job['done']}/{job['total']} · 入选{job['matched']} · 历史不足排除{job['excluded']} · 数据失败{job['failed']}"
             with self.lock:
                 job=self.jobs[sid];job.update(status='complete',finished_mono=time.monotonic(),finished=clock())

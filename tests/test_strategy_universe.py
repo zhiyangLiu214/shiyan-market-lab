@@ -9,7 +9,7 @@ from terminal_strategy_scan import StrategyMarketScan
 
 DAY='2026-11-13'
 
-def cfg(**kw):return dict(name='市场策略',pool='market',formula='C>0',ranking='C',**kw)
+def cfg(**kw):return dict(name='市场策略',pool='market',formula='C>0',ranking='C',ranking_mode='formula',**kw)
 
 class UniverseTests(unittest.TestCase):
     def test_board_membership_includes_new_main_and_excludes_other_securities(self):
