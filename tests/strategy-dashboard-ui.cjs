@@ -21,6 +21,11 @@ vm.createContext(context);vm.runInContext(source,context);
  assert.match(get('simList').innerHTML,/合计5个/);assert.equal(calls.filter(([u])=>u.includes('&id=')).length,3);
  // A card action explicitly targets B, regardless of which rule was edited.
  await context.simAction('toggle','b');const post=calls.find(([,o])=>o&&JSON.parse(o.body).action==='toggle');assert.equal(JSON.parse(post[1].body).id,'b');assert.equal(JSON.parse(post[1].body).enabled,false);
+ context.simEditStrategy('b');assert.equal(get('simSave').textContent,'保存修改');assert.equal(get('simSaveAs').hidden,false);
+ await context.simAction('update');assert.ok(calls.some(([,o])=>o&&JSON.parse(o.body).action==='update'&&JSON.parse(o.body).id==='b'));
+ let confirmed=false;context.window={confirm:()=>confirmed};
+ await context.simAction('delete','c');assert.ok(!calls.some(([,o])=>o&&JSON.parse(o.body).action==='delete'));
+ confirmed=true;await context.simAction('delete','c');assert.ok(calls.some(([,o])=>o&&JSON.parse(o.body).action==='delete'&&JSON.parse(o.body).id==='c'));
  failId='b';await context.loadStrategySim();assert.match(get('simResults').innerHTML,/网络中断/);assert.match(get('simResults').innerHTML,/策略b/);failId=null;
  context.simFill();get('simEditor').open=true;await context.simAction('save');assert.equal(get('simEditor').open,false);assert.ok(get('simResults').innerHTML.includes('data-sim-card="d"'));
  failSave=true;get('simEditor').open=true;elements.name.value='未保存草稿';await context.simAction('save');assert.equal(get('simEditor').open,true);assert.equal(elements.name.value,'未保存草稿');assert.match(get('simMessage').textContent,/保存失败/);

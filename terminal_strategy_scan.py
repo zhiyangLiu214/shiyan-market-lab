@@ -19,6 +19,10 @@ class StrategyMarketScan:
             job=self.jobs.get(sid)
             return {k:v for k,v in job.items() if k not in ('thread','finished_mono')} if job else None
 
+    def invalidate(self, sid):
+        with self.lock:
+            self.jobs.pop(sid, None)
+
     def request(self,item):
         sid=item['id'];now=clock();cfg=item['config']
         with self.lock:
@@ -28,7 +32,7 @@ class StrategyMarketScan:
             if self.active is not None:return dict(ready=False,items=[],reason='正在扫描另一套市场策略，稍后重试',market_scan=self.snapshot(sid))
             job=dict(status='running',day=now[:10],started=now,checked=now,total=0,done=0,failed=0,excluded=0,matched=0,rows=[],source='上交所股票名录 + 深交所A股名录',reason='正在读取完整市场名录',boards=cfg['boards'])
             self.jobs[sid]=job;self.active=sid
-            thread=threading.Thread(target=self._run,args=(item,),daemon=True,name='strategy-market-scan');job['thread']=thread;thread.start()
+            thread=threading.Thread(target=self._run,args=(item,job),daemon=True,name='strategy-market-scan');job['thread']=thread;thread.start()
             return self._pool(sid)
 
     def _pool(self,sid):
@@ -39,12 +43,14 @@ class StrategyMarketScan:
         matches=sorted([r for r in job['rows'] if r.get('matched') and r.get('data_ok')],key=lambda r:(-r['rank'],r['code']))
         return dict(ready=ready,items=matches[:50] if ready else [],reason=job['reason'],market_scan=job)
 
-    def _run(self,item):
+    def _run(self,item,job):
         sid=item['id'];cfg=item['config'];day=clock()[:10]
         try:
             items=self.universe.load(cfg['boards'])
-            with self.lock:self.jobs[sid].update(total=len(items),reason='逐只检查日线公式；扫描期间继续独立监控已有持仓')
+            with self.lock:job.update(total=len(items),reason='逐只检查日线公式；扫描期间继续独立监控已有持仓')
             def check(meta):
+                if self.jobs.get(sid) is not job:
+                    return None
                 row=dict(meta,matched=False,rank=None,data_ok=False)
                 try:
                     quote=self.reader(meta['code'],item['mode'],meta)
@@ -64,16 +70,17 @@ class StrategyMarketScan:
                 for future in as_completed(futures):
                     row=future.result()
                     with self.lock:
-                        job=self.jobs[sid];job['rows']=job['rows']+[row];job['done']+=1;job['checked']=clock()
+                        if self.jobs.get(sid) is not job:return
+                        job['rows']=job['rows']+[row];job['done']+=1;job['checked']=clock()
                         if row.get('excluded'):job['excluded']+=1
                         elif not row['data_ok']:job['failed']+=1
                         if row['matched'] and row['data_ok']:job['matched']+=1
                         job['reason']=f"市场扫描 {job['done']}/{job['total']} · 入选{job['matched']} · 历史不足排除{job['excluded']} · 数据失败{job['failed']}"
             with self.lock:
-                job=self.jobs[sid];job.update(status='complete',finished_mono=time.monotonic(),finished=clock())
+                job.update(status='complete',finished_mono=time.monotonic(),finished=clock())
                 if clock()[:10]!=day:job.update(status='error',reason='扫描跨交易日，结果不能用于买入')
                 elif job['failed']:job['reason']+='；结果不完整，不据此自动买入'
         except Exception:
-            with self.lock:self.jobs[sid].update(status='error',reason='市场名录获取失败；不能确认完整选股范围',finished_mono=time.monotonic(),finished=clock())
+            with self.lock:job.update(status='error',reason='市场名录获取失败；不能确认完整选股范围',finished_mono=time.monotonic(),finished=clock())
         finally:
             with self.lock:self.active=None
