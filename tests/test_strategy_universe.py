@@ -64,6 +64,19 @@ class FullScanTests(unittest.TestCase):
             scan.request(dict(id='s',mode='live',config=checked_config(c)));scan.jobs['s']['thread'].join(3);pool=scan._pool('s')
         self.assertTrue(pool['ready']);self.assertEqual(len(pool['items']),1)
 
+    def test_scheduled_run_starts_fresh_after_manual_preview(self):
+        universe=unittest.mock.Mock()
+        universe.load.return_value=[dict(code='600001',name='股票')]
+        scan=StrategyMarketScan(universe,lambda *args:dict(bars=[dict(date=DAY,close=10)]))
+        item=dict(id='s',mode='live',config=checked_config(cfg()))
+        with patch('terminal_strategy_scan.clock',return_value=DAY+' 14:30:05'):
+            scan.request(item)
+            scan.jobs['s']['thread'].join(2)
+            scan.request(item,scheduled_for=DAY+' 14:30:00')
+            scan.jobs['s']['thread'].join(2)
+            self.assertTrue(scan.request(item,scheduled_for=DAY+' 14:30:00')['ready'])
+        self.assertEqual(universe.load.call_count,2)
+
     def test_unavailable_roster_is_not_an_empty_success(self):
         universe=unittest.mock.Mock();universe.load.side_effect=ValueError('offline');scan=StrategyMarketScan(universe,None)
         scan.request(dict(id='s',mode='live',config=checked_config(cfg())));scan.jobs['s']['thread'].join(3)
