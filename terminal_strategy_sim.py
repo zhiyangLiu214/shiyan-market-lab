@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager,nullcontext
+from contextlib import contextmanager
 from datetime import datetime,timedelta
 from pathlib import Path
 
@@ -164,6 +164,22 @@ class StrategyEngine:
         with self.store.lock:guard=self.guards.setdefault(sid,threading.Lock())
         with guard:yield
 
+    def update_config(self, sid, body):
+        config = checked_config(body)
+        with self.execution_lock(sid), self.store.lock:
+            item = self.store.get(sid)
+            if config != item['config']:
+                with self.store.db() as db:
+                    # Update the account cap and registry as one SQLite transaction.
+                    db.execute('ATTACH DATABASE ? AS account_book', (str(self.store.book(sid).path),))
+                    db.execute('UPDATE account_book.accounts SET cap=? WHERE mode=? AND id=?',
+                               (config['max_exposure'], item['mode'], 'main'))
+                    db.execute("UPDATE strategies SET config=?,result='{}',checked=NULL,status=? WHERE id=?",
+                               (json.dumps(config, ensure_ascii=False), '规则已更新，等待下一次检查', sid))
+                if self.market_scan:
+                    self.market_scan.invalidate(sid)
+            return self.store.get(sid)
+
     def request_check(self,sid):
         self.store.get(sid)
         def work():
@@ -226,7 +242,7 @@ class StrategyEngine:
         return row
 
     def tick(self,sid,preview=False):
-        with (nullcontext() if preview else self.execution_lock(sid)):
+        with self.execution_lock(sid):
             item=self.store.get(sid);cfg=item['config'];mode=item['mode'];now=clock();book=self.store.book(sid)
             snap=book.snapshot(mode,now);account=snap['accounts'][0] if snap['accounts'] else None
             target=now[:10]+' '+cfg['buy_time']+':00'

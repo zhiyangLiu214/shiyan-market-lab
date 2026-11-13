@@ -454,7 +454,8 @@ def register_terminal(app, load_boards, load_board_stocks):
             else:
                 sid=body.get('id');item=strategy_store.get(sid)
                 if item['mode']!=mode:raise ValueError('策略不属于当前数据模式')
-                if action=='check':data=strategy_engine.request_check(sid)
+                if action=='update':data=strategy_engine.update_config(sid,body.get('config'))
+                elif action=='check':data=strategy_engine.request_check(sid)
                 elif action=='toggle':
                     strategy_engine.toggle(sid,body.get('enabled'))
                     if not os.environ.get('TDX_NO_PAPER_WORKER'):

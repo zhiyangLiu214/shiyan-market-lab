@@ -104,6 +104,19 @@ class EngineTests(unittest.TestCase):
         result=self.tick(True)
         self.assertFalse(result['enabled']);self.assertEqual(result['ledger']['accounts'],[])
         self.assertTrue(result['result']['items'][0]['matched'])
+    def test_edit_keeps_running_account_and_orders_and_updates_cap(self):
+        self.toggle()
+        before = self.tick()['ledger']['accounts'][0]
+        self.assertTrue(before['orders'])
+        updated = self.engine.update_config(self.sid, dict(self.item['config'], name='改名', max_exposure=50))
+        self.assertEqual(updated['id'], self.sid)
+        self.assertTrue(updated['enabled'])
+        self.assertEqual(len(self.store.list('live')), 1)
+        after = self.store.snapshot(self.sid)['ledger']['accounts'][0]
+        self.assertEqual(after['orders'], before['orders'])
+        self.assertEqual(after['cash'], before['cash'])
+        self.assertEqual(after['cap'], 50)
+
     def test_selection_formula_receives_verified_daily_name(self):
         item=self.store.create(dict(config(),formula="NAMELIKE('测试') AND C>MA(C,5)"),'live')
         self.sid=item['id'];result=self.tick(True)
