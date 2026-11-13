@@ -30,6 +30,7 @@ async function loadBacktests() {
 
 function backtestResultHTML(report) {
     const partial = report.status === 'partial';
+    const fee = report.fee_schedule;
     const detail = (report.assumptions || []).map(text => `<p>${esc(text)}</p>`).join('');
     const cards = (report.results || []).map(result => {
         const trades = result.trades || [];
@@ -52,6 +53,7 @@ function backtestResultHTML(report) {
     return `<div class="panel backtest-notice"><b>${esc(report.start)} 至 ${esc(report.end)} · ${esc(report.progress)}</b>
         <p>14:30选股 · 收盘价买入 · 每套初始100,000元 · ${report.sessions?.length||0}个交易日${report.coverage_pct==null?'':' · 数据覆盖'+fmt(report.coverage_pct)+'%'}</p>
         <p>历史回溯使用独立账本，结果仅保存在本页。</p>
+        ${fee?`<p>本次佣金：双向万${fmt(fee.commission_rate*10000,1)}，每笔最低${fmt(fee.minimum_commission)}元；过户费双向万${fmt(fee.transfer_rate*10000,1)}，卖出印花税万${fmt(fee.sell_stamp_rate*10000,1)}。</p>`:''}
         ${report.id?`<p class="backtest-download"><a href="/api/terminal/backtests/export?id=${encodeURIComponent(report.id)}&format=json" download>下载完整数据（JSON）</a>${report.xlsx_available?`<a href="/api/terminal/backtests/export?id=${encodeURIComponent(report.id)}&format=xlsx" download>下载 Excel 明细</a>`:''}</p>`:''}
         ${partial?'<p class="down">存在数据缺口。当前收益仅代表已覆盖的样本，需补齐数据后复核。</p>':''}
         <details><summary>本次规则与数据范围</summary><p>${esc(report.universe_note||'')} · ${report.universe_count||0}只股票</p>${detail}</details>

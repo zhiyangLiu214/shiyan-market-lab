@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo
 TZ = ZoneInfo('Asia/Shanghai')
 INITIAL = 100000.0
 VERSION = 'paper-forward-v2-dynamic'
+FEE_SCHEDULE = dict(commission_rate=.0001, minimum_commission=1.,
+                    transfer_rate=.00001, sell_stamp_rate=.0005)
 
 
 def clock():
@@ -40,8 +42,9 @@ def lot(code):
 
 
 def fees(gross, side):
-    return dict(commission=max(5., money(gross * .00025)),
-                transfer=money(gross * .00001), stamp=money(gross * .0005) if side == 'sell' else 0.)
+    return dict(commission=max(FEE_SCHEDULE['minimum_commission'], money(gross * FEE_SCHEDULE['commission_rate'])),
+                transfer=money(gross * FEE_SCHEDULE['transfer_rate']),
+                stamp=money(gross * FEE_SCHEDULE['sell_stamp_rate']) if side == 'sell' else 0.)
 
 
 class PaperLedger:

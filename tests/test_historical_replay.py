@@ -5,12 +5,46 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from terminal_backtest import selection_bars, minute_points, replay_strategy, BacktestStore
+from terminal_backtest import selection_bars, minute_points, replay_strategy, BacktestStore, sina_intraday_rows
 from terminal_formula import evaluate_formula
 from terminal_formula_prefilter import might_match
 from terminal_holding import holding_deadline
 from terminal_paper import PaperLedger
 from terminal_strategy_sim import checked_config
+
+
+class HistoricalExecutionTests(unittest.TestCase):
+    def replay(self, closes):
+        dates=['2026-10-08','2026-10-09','2026-10-12','2026-10-13']
+        raw=[[d,c,c,c,c,100000] for d,c in zip(dates,closes)]
+        class Data:
+            def daily(self,code):return dict(raw=raw,qfq=raw)
+            def ticks(self,code,day):
+                price=next(row[2] for row in raw if row[0]==day)
+                return dict(points=[dict(time=t,price=price,volume=10000,average=price)
+                                    for t in ['09:31','09:32','15:00']])
+        cfg=checked_config(dict(name='fixture',formula='XG:C>0;',pool='market',holding_limit=False))
+        match=dict(strategy='test',date=dates[1],code='600000',name='样本',rank=90)
+        def exit_signal(position,quote,config,lines,state):
+            return dict(sell=True,reason='止损信号',lines=lines,state={})
+        with patch('terminal_backtest.minute_points',side_effect=lambda ticks,bar:ticks['points']),patch('terminal_backtest.exit_decision',side_effect=exit_signal):
+            return replay_strategy(dict(id='test',config=cfg),[match],Data(),dates[1:])
+
+    def test_closing_limit_up_never_assumes_a_fill(self):
+        r=self.replay([10,11,11,11])
+        self.assertEqual(r['trades'],[])
+        self.assertEqual(r['nav'],100000)
+        self.assertIn('涨停',r['skipped'][0]['reason'])
+
+    def test_limit_down_keeps_position_until_actual_sellable_price(self):
+        r=self.replay([10,10,9,8.8])
+        self.assertEqual([t['date'] for t in r['trades']],['2026-10-09','2026-10-13'])
+        self.assertEqual(r['trades'][1]['price'],8.8)
+        self.assertEqual(r['equity'][1]['positions'],1)
+        self.assertLess(r['equity'][1]['nav'],100000)
+        self.assertLess(r['nav'],r['equity'][1]['nav'])
+        self.assertEqual(r['positions'],[])
+        self.assertAlmostEqual(r['nav'],100000+r['realized'],places=2)
 
 
 class HoldingDeadlineTests(unittest.TestCase):
@@ -56,6 +90,11 @@ class HoldingDeadlineTests(unittest.TestCase):
 
 
 class SelectionTests(unittest.TestCase):
+    def test_sina_jsonp_and_volume_units(self):
+        body='/* wrapper */ var _=('+json.dumps([dict(day='2025-11-13 14:30:00',open='10',close='11',high='12',low='9',volume='172701')])+');'
+        self.assertEqual(sina_intraday_rows(body),[['202511131430',10.,11.,12.,9.,1727.01]])
+        with self.assertRaises(ValueError):sina_intraday_rows('{"error":3}')
+
     def fixture(self):
         day='2026-09-30'
         daily={'raw':[['2026-09-29',10,10,11,9,900],[day,10,12,13,9,800]],
