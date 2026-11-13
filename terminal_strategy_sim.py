@@ -214,9 +214,11 @@ class StrategyEngine:
         row=dict(code=meta['code'],name=meta.get('name',meta['code']),matched=False,rank=None,data_ok=False)
         try:
             if not q or (not q.get('valid') and item['mode']!='demo'):raise FormulaError('缺少同日有效分钟或日线')
-            bars=q['daily'].get('bars',[])
+            if q['daily'].get('formula_error'):raise FormulaError(q['daily']['formula_error'])
+            bars=q['daily'].get('formula_bars',q['daily'].get('bars',[]))
             if not bars or item['mode']!='demo' and bars[-1]['date']!=q['date']:raise FormulaError('缺少当日日线快照，不能用昨日数据代替')
-            row['name']=q['daily'].get('name') or row['name'];row['source']=q['daily'].get('source');row['as_of']=q['as_of']
+            row['name']=q['daily'].get('name') or row['name'];row['source']=q['daily'].get('formula_source',q['daily'].get('source'));row['as_of']=q['as_of']
+            row['adjustment']=q['daily'].get('formula_adjustment');row['bar_count']=len(bars)
             row['matched']=bool(evaluate_formula(item['config']['formula'],bars,code=meta['code'],name=row['name']))
             if row['matched']:row.update(strategy_rank(item['config'],bars,meta['code'],row['name']))
             row['data_ok']=True;row['reason']='公式入选' if row['matched'] else '公式不满足'

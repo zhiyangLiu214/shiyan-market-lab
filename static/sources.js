@@ -9,7 +9,7 @@ async function loadSources(){
   const tushare=(s.connections||[]).find(c=>c.provider==='tushare');
   const tushareOption=$('quoteSource').querySelector('option[value="tushare"]');
   if(tushareOption)tushareOption.disabled=!tushare?.configured;
-  const rows=s.providers||[],labels={daily:'日线',minute:'分钟',funds:'板块资金'};
+  const rows=s.providers||[],labels={daily:'不复权日线',daily_qfq:'前复权日线',minute:'分钟',funds:'板块资金'};
   $('sourceHealth').innerHTML=rows.length?rows.map(p=>`<span>${esc(labels[p.channel]||p.channel)} · ${esc(p.name)}：${esc({ok:'可用',observation:'仅供观察',unavailable:'不可用'}[p.status]||p.status)} · ${esc(p.reason)} <small>${esc(p.at)}</small></span>`).join('<br>'):'尚未请求数据；实际来源将在个股、分时和板块卡片内显示。';
   for(const p of s.stock_funds_health||[]){
    const retry=p.retry_in>0?`；${p.retry_in}秒后允许自动复检`:'；下次资金请求自动复检';

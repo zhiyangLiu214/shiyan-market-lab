@@ -58,8 +58,13 @@ class QuoteRouter:
 
     def fetch(self, kind, code):
         validate_code(code)
+        if kind not in ('daily','daily_qfq','minute'):raise ValueError('无效行情类型')
+        daily=kind in ('daily','daily_qfq')
         with self.lock:preferred=self.preferred
         order=[p for p in LABELS if p!='tushare' or self.tushare.configured()]
+        # Only these adapters have a verified forward-adjusted daily request.
+        # Never feed raw bars from the ordinary TDX/Tushare adapters to a formula.
+        if kind=='daily_qfq':order=[p for p in order if p in ('em','tencent')]
         if preferred in order: order.remove(preferred);order.insert(0,preferred)
         errors=['Tushare：未配置，已回退其他来源'] if preferred=='tushare' and preferred not in order else []
         for provider in order:
@@ -69,7 +74,7 @@ class QuoteRouter:
                     errors.append(LABELS[provider]+'：暂不可用，冷却中');continue
             try:
                 frame=getattr(self, '_'+provider)(kind,code)
-                if kind=='daily':
+                if daily:
                     checked=normalize_bars(frame)
                     if len(checked)<35:raise ValueError('日线不足35根')
                     if checked.date.max().date()>datetime.now(TZ).date():raise ValueError('未来日期')
@@ -79,9 +84,9 @@ class QuoteRouter:
                     today=datetime.now(TZ)
                     if today.weekday()<5 and today.strftime('%H:%M')>='09:35' and data['date']!=today.strftime('%Y-%m-%d'):
                         raise ValueError('分钟数据不是当前交易日')
-                meta=dict(source=LABELS[provider]+('日线 · 不复权' if kind=='daily' else '分钟行情'),provider=provider,
+                meta=dict(source=LABELS[provider]+('日线 · 前复权' if kind=='daily_qfq' else '日线 · 不复权' if daily else '分钟行情'),provider=provider,
                           source_fallback=bool(errors),source_errors=errors,source_note=frame.attrs.get('source_note',''),retrieved_at=now_text())
-                if kind=='daily':data.attrs.update(meta)
+                if daily:data.attrs.update(meta,adjustment='qfq' if kind=='daily_qfq' else 'none')
                 else:data.update(meta)
                 with self.lock:
                     self.until.pop(key,None);self.states[key]=dict(status='ok',at=now_text(),code=code,reason='已切至备用' if errors else '正常')
@@ -97,21 +102,25 @@ class QuoteRouter:
         return self.tushare.prices(kind,code)
 
     def _em(self,kind,code):
-        if kind=='daily':
+        if kind in ('daily','daily_qfq'):
             end=datetime.now(TZ)
-            return ak.stock_zh_a_hist(symbol=code,period='daily',start_date=(end-timedelta(days=400)).strftime('%Y%m%d'),end_date=end.strftime('%Y%m%d'),adjust='',timeout=8)
+            frame=ak.stock_zh_a_hist(symbol=code,period='daily',start_date=(end-timedelta(days=900 if kind=='daily_qfq' else 400)).strftime('%Y%m%d'),end_date=end.strftime('%Y%m%d'),adjust='qfq' if kind=='daily_qfq' else '',timeout=8)
+            return frame.tail(500) if kind=='daily_qfq' else frame
         return ak.stock_zh_a_hist_min_em(symbol=code,period='1',adjust='')
 
     def _tencent(self,kind,code):
         sym=symbol(code)
-        url='https://web.ifzq.gtimg.cn/appstock/app/'+('kline/kline' if kind=='daily' else 'minute/query')
-        r=requests.get(url,params={'param':sym+',day,,,260'} if kind=='daily' else {'code':sym},timeout=(4,8))
+        url='https://web.ifzq.gtimg.cn/appstock/app/'+('fqkline/get' if kind=='daily_qfq' else 'kline/kline' if kind=='daily' else 'minute/query')
+        params={'param':sym+',day,,,500,qfq'} if kind=='daily_qfq' else {'param':sym+',day,,,260'} if kind=='daily' else {'code':sym}
+        r=requests.get(url,params=params,timeout=(4,8))
         r.raise_for_status();payload=r.json()
         if payload.get('code')!=0:raise ValueError('接口错误')
         data=payload.get('data',{}).get(sym)
         if not data:raise ValueError('返回代码不匹配')
-        if kind=='daily':
-            frame=pd.DataFrame([x[:6] for x in data.get('day',[])],columns=['date','open','close','high','low','volume'])
+        if kind in ('daily','daily_qfq'):
+            rows=data.get('qfqday' if kind=='daily_qfq' else 'day',[])
+            if not rows:raise ValueError('缺少前复权日线' if kind=='daily_qfq' else '缺少日线')
+            frame=pd.DataFrame([x[:6] for x in rows],columns=['date','open','close','high','low','volume'])
             frame.attrs['source_note']='成交量单位：手；源未提供日成交额，五日VWAP留空，不以收盘价估造。'
             return frame
         raw=data.get('data',{});date=datetime.strptime(raw['date'],'%Y%m%d').strftime('%Y-%m-%d')
