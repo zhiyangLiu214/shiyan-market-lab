@@ -66,7 +66,8 @@ class QuoteRouter:
         # Never feed raw bars from the ordinary TDX/Tushare adapters to a formula.
         if kind=='daily_qfq':order=[p for p in order if p in ('em','tencent')]
         if preferred in order: order.remove(preferred);order.insert(0,preferred)
-        errors=['Tushare：未配置，已回退其他来源'] if preferred=='tushare' and preferred not in order else []
+        errors=([LABELS[preferred]+'：当前适配未提供前复权，已回退前复权来源'] if kind=='daily_qfq' and preferred in ('tdx','tushare') else
+                ['Tushare：未配置，已回退其他来源'] if preferred=='tushare' and preferred not in order else [])
         for provider in order:
             key=(kind,provider)
             with self.lock:

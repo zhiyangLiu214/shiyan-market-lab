@@ -39,6 +39,7 @@ class AdjustedQuoteTests(unittest.TestCase):
         data=router.fetch('daily_qfq','600001')
         self.assertEqual(data.attrs['adjustment'],'qfq');self.assertIn('前复权',data.attrs['source'])
         self.assertTrue(data.attrs['source_fallback']);router._tdx.assert_not_called();router._tushare.assert_not_called()
+        self.assertIn('当前适配未提供前复权',data.attrs['source_errors'][0])
         # An adjusted-channel timeout does not cool down the raw channel.
         router._em=Mock(return_value=demo_history('000001'));router.preferred='em'
         self.assertEqual(router.fetch('daily','600001').attrs['adjustment'],'none')
