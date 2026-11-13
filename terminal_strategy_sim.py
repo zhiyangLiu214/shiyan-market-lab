@@ -14,6 +14,7 @@ from terminal_formula import compile_formula,evaluate_formula,FormulaError
 from terminal_paper import PaperLedger,clock,session,lot,money,number
 from terminal_strategy_exit import exit_decision,PATTERNS
 from terminal_universe import BOARDS,in_boards
+from terminal_strategy_rank import strategy_rank
 
 EXAMPLE='MA5:=MA(C,5);\nMA20:=MA(C,20);\n选股:C>MA20 AND MA5>MA20 AND V>MA(V,5)*1.2;'
 
@@ -23,7 +24,11 @@ def checked_config(body):
     name=str(body.get('name','')).strip();description=str(body.get('description','')).strip()
     formula=body.get('formula','');ranking=body.get('ranking','C/REF(C,1)-1')
     if not 1<=len(name)<=60 or len(description)>4000:raise ValueError('请填写策略名称；说明最多4000字')
-    compile_formula(formula);compile_formula(ranking)
+    compile_formula(formula)
+    ranking_mode=body.get('ranking_mode','composite')
+    if ranking_mode not in ('composite','formula'):raise ValueError('排序方式无效')
+    if ranking_mode=='formula':compile_formula(ranking)
+    else:ranking='C/REF(C,1)-1'
     pool=body.get('pool','custom')
     if pool not in ('custom','main','scan','market'):raise ValueError('股票池无效')
     boards=body.get('boards',list(BOARDS))
@@ -49,7 +54,7 @@ def checked_config(body):
     if values['position_pct']>values['max_exposure']:raise ValueError('单股仓位不能超过总仓位')
     patterns=body.get('exit_patterns',['vwap_cross'])
     if not isinstance(patterns,list) or any(p not in PATTERNS for p in patterns):raise ValueError('辅助卖出条件无效')
-    return dict(name=name,description=description,formula=formula,ranking=ranking,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
+    return dict(name=name,description=description,formula=formula,ranking=ranking,ranking_mode=ranking_mode,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
                 **values,limit_up_trail=True,initial_cash=100000,buy_window_seconds=120)
 
 
@@ -76,7 +81,7 @@ class StrategyStore:
         if not isinstance(sid,str) or not re.fullmatch('[a-f0-9]{32}',sid):raise ValueError('策略编号无效')
         with self.db() as db:row=db.execute('SELECT * FROM strategies WHERE id=?',(sid,)).fetchone()
         if not row:raise ValueError('策略不存在')
-        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['result']=json.loads(item['result'] or '{}');return item
+        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['result']=json.loads(item['result'] or '{}');return item
 
     def list(self,mode):
         with self.db() as db:ids=[r[0] for r in db.execute('SELECT id FROM strategies WHERE mode=? ORDER BY created DESC,rowid DESC',(mode,))]
@@ -213,7 +218,7 @@ class StrategyEngine:
             if not bars or item['mode']!='demo' and bars[-1]['date']!=q['date']:raise FormulaError('缺少当日日线快照，不能用昨日数据代替')
             row['name']=q['daily'].get('name') or row['name'];row['source']=q['daily'].get('source');row['as_of']=q['as_of']
             row['matched']=bool(evaluate_formula(item['config']['formula'],bars))
-            row['rank']=evaluate_formula(item['config']['ranking'],bars)
+            if row['matched']:row.update(strategy_rank(item['config'],bars,meta['code'],row['name']))
             row['data_ok']=True;row['reason']='公式入选' if row['matched'] else '公式不满足'
         except (ValueError,TypeError,KeyError,ArithmeticError) as exc:row['reason']=str(exc)[:200]
         return row
@@ -243,6 +248,7 @@ class StrategyEngine:
                 except Exception:return meta['code'],None
             with ThreadPoolExecutor(max_workers=4) as executor:quotes=dict(executor.map(read,metas.values()))
             assessments=[self._assessment(meta,quotes.get(meta['code']),item) for meta in items]
+            assessments.sort(key=lambda r:(not(r['data_ok'] and r['matched']),-(r['rank'] if r['rank'] is not None else 0),r['code']))
             valid=pool.get('ready',False) and all(r['data_ok'] for r in assessments)
             reasons=[];submitted=[];holding_checks=[]
             if not preview and item['enabled'] and account:
@@ -297,7 +303,7 @@ class StrategyEngine:
                         if qty<minimum:row['reason']='资金分配不足最小买入数量';continue
                         plan=dict(date=q['date'],stop=q['price']*(1-cfg['stop_loss']/100),target1=q['price']*(1+cfg['take_profit']/100))
                         try:
-                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,'定时买入；自定义选股公式成立','auto',clock())
+                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,('定时买入；自定义选股公式成立；'+('综合评分 '+str(row['rank'])+' 分优先' if cfg.get('ranking_mode')=='composite' else '自定义排序值 '+str(row['rank']))),'auto',clock())
                             submitted.append(oid);reserved.add(code);row['reason']='已提交，等待后续新分钟成交'
                         except ValueError as exc:row['reason']=str(exc)
                     self.store.daily(sid,now[:10],'done','已完成本日定时检查，不重复买入')

@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../static/strategy-sim.js'),'utf8');
-const elements=Object.fromEntries(['name','description','formula','ranking','pool','codes','buy_time','take_profit','stop_loss','position_pct','max_exposure','max_positions'].map(k=>[k,{value:''}]));
+const elements=Object.fromEntries(['name','description','formula','ranking','ranking_mode','pool','codes','buy_time','take_profit','stop_loss','position_pct','max_exposure','max_positions'].map(k=>[k,{value:''}]));
 const boards=['main','chinext','star'].map(value=>({value,checked:true})),patterns=[{value:'vwap_cross',checked:true}],nodes=new Map();
 const form={elements,querySelectorAll(s){const all=s.includes('boards')?boards:patterns;return s.endsWith(':checked')?all.filter(x=>x.checked):all;}};
 const get=id=>{if(id==='simForm')return form;if(!nodes.has(id))nodes.set(id,{innerHTML:'',querySelectorAll:()=>[]});return nodes.get(id);};
