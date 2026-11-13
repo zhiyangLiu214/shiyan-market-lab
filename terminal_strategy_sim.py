@@ -197,7 +197,7 @@ class StrategyEngine:
 
     def _pool(self,item):
         cfg=item['config']
-        if cfg['pool']=='custom':return dict(ready=True,items=[dict(code=c,name=c) for c in cfg['codes']],reason='自定义股票池')
+        if cfg['pool']=='custom':return dict(ready=True,items=[dict(code=c,name=c) for c in cfg['codes'] if in_boards(c,cfg.get('boards',list(BOARDS)))],reason='自定义股票池')
         if cfg['pool']=='market':
             if item['mode']=='demo':return dict(ready=False,items=[],reason='市场全范围扫描仅支持真实行情，演示样本不冒充全市场')
             if not self.market_scan:return dict(ready=False,items=[],reason='市场扫描服务尚未配置')
@@ -304,6 +304,7 @@ class StrategyEngine:
                 elif buying and not valid:reasons.append('股票池或部分行情不完整，窗口内继续等待；不按残缺结果排名买入')
                 if seconds>=120 and not finished and datetime.strptime(now[:10],'%Y-%m-%d').weekday()<5:self.store.daily(sid,now[:10],'missed','已错过本日买入窗口，不补单')
             status='公式检查完成，不产生委托' if preview else '运行中；持仓退出持续检查，等待每日'+cfg['buy_time']+'买入'
+            if preview and cfg['pool']=='market':status=pool.get('reason','市场扫描后台检查中')+'；本次不会下单'
             if not preview and not session(clock()):status='非连续竞价时段，等待交易时段，不补买单'
             if not preview and reasons:status='；'.join(reasons[:3])
             result=dict(items=assessments,holdings=holding_checks,pool_ready=pool.get('ready'),pool_reason=pool.get('reason'),preview=preview,submitted=len(submitted),as_of=clock(),market_scan=pool.get('market_scan'),scope=('已选市场完整名录逐只检查；全部入选可查看，排序前50名再取实时分钟核验买入' if cfg['pool']=='market' else '按已选市场过滤；自定义池最多50只，主线/三维仅各自候选池'))
