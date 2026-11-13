@@ -117,6 +117,17 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(after['cash'], before['cash'])
         self.assertEqual(after['cap'], 50)
 
+    def test_delete_running_strategy_archives_ledger_and_cancels_order(self):
+        self.toggle()
+        self.tick()
+        book = self.store.book(self.sid)
+        self.engine.archive(self.sid)
+        self.assertEqual(self.store.list('live'), [])
+        with self.assertRaises(ValueError):
+            self.store.get(self.sid)
+        account = book.snapshot('live')['accounts'][0]
+        self.assertEqual(account['orders'][0]['status'], 'cancelled')
+
     def test_selection_formula_receives_verified_daily_name(self):
         item=self.store.create(dict(config(),formula="NAMELIKE('测试') AND C>MA(C,5)"),'live')
         self.sid=item['id'];result=self.tick(True)

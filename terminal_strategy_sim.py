@@ -80,7 +80,7 @@ class StrategyStore:
     def get(self,sid):
         if not isinstance(sid,str) or not re.fullmatch('[a-f0-9]{32}',sid):raise ValueError('策略编号无效')
         with self.db() as db:row=db.execute('SELECT * FROM strategies WHERE id=?',(sid,)).fetchone()
-        if not row:raise ValueError('策略不存在')
+        if not row or row['mode'].startswith('archived'):raise ValueError('策略不存在或已删除')
         item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['result']=json.loads(item['result'] or '{}');return item
 
     def list(self,mode):
@@ -90,7 +90,7 @@ class StrategyStore:
     def create(self,config,mode):
         config=checked_config(config);sid=uuid.uuid4().hex
         with self.db() as db:
-            if db.execute('SELECT COUNT(*) FROM strategies').fetchone()[0]>=50:raise ValueError('最多保留50套策略')
+            if db.execute("SELECT COUNT(*) FROM strategies WHERE mode IN ('demo','live')").fetchone()[0]>=50:raise ValueError('最多保留50套策略')
             db.execute('INSERT INTO strategies VALUES(?,?,?,0,NULL,?,?,NULL,?)',
                        (sid,mode,json.dumps(config,ensure_ascii=False),clock(),'已保存，尚未启动','{}'))
         return self.get(sid)
@@ -179,6 +179,18 @@ class StrategyEngine:
                 if self.market_scan:
                     self.market_scan.invalidate(sid)
             return self.store.get(sid)
+
+    def archive(self, sid):
+        with self.execution_lock(sid), self.store.lock:
+            item = self.store.get(sid)
+            if item['enabled']:
+                self.toggle(sid, False)
+            with self.store.db() as db:
+                db.execute("UPDATE strategies SET mode=?,enabled=0,status=? WHERE id=?",
+                           ('archived-' + item['mode'], '已删除并归档', sid))
+            if self.market_scan:
+                self.market_scan.invalidate(sid)
+            return dict(id=sid, archived=True)
 
     def request_check(self,sid):
         self.store.get(sid)

@@ -455,6 +455,7 @@ def register_terminal(app, load_boards, load_board_stocks):
                 sid=body.get('id');item=strategy_store.get(sid)
                 if item['mode']!=mode:raise ValueError('策略不属于当前数据模式')
                 if action=='update':data=strategy_engine.update_config(sid,body.get('config'))
+                elif action=='delete':data=strategy_engine.archive(sid)
                 elif action=='check':data=strategy_engine.request_check(sid)
                 elif action=='toggle':
                     strategy_engine.toggle(sid,body.get('enabled'))
