@@ -1,4 +1,6 @@
 """Two portfolios use separate candidate pools and identical forward execution rules."""
+from terminal_holding import holding_deadline
+
 import json
 import math
 import threading
@@ -10,8 +12,9 @@ from terminal_paper import PaperLedger, clock, session, lot, number, money, TZ
 
 
 class PaperRunner:
-    def __init__(self, ledger, market, scan, detail, minute):
+    def __init__(self, ledger, market, scan, detail, minute, calendar=None):
         self.ledger, self.market, self.scan, self.detail, self.minute = ledger, market, scan, detail, minute
+        self.calendar = calendar
         self.guard, self.thread = threading.Lock(), None
         self.wakeup = threading.Event()
         self.cache, self.last_pool = {}, {}
@@ -166,6 +169,7 @@ class PaperRunner:
             self.ledger.status(mode, '非连续竞价时段：等待下一交易时段，不补单' if not active else '自动策略暂停；已核对待成交单与持仓估值')
             return
         snap = self.ledger.snapshot(mode)
+        calendar = self.calendar(now[:10]) if self.calendar and any(a['positions'] and a.get('holding_limit',1) for a in snap['accounts']) else []
         outcomes = []
         for account in snap['accounts']:
             aid = account['id']; positions = {p['code']:p for p in account['positions']}
@@ -203,6 +207,10 @@ class PaperRunner:
                         reason, fraction = '两根分钟弱于均价且同日主力流出，减仓', .5
                     elif account['exposure'] > account['cap']+.5:
                         reason, fraction = '市值上涨导致被动超出仓位上限，回收风险', min(1.,(account['value']-account['nav']*account['cap']/100)/max(p['value'],1))
+                deadline = holding_deadline(p, dict(q,sessions=calendar or q.get('sessions',[])), bool(account.get('holding_limit', 1)))
+                if deadline['sell']:
+                    self.ledger.mark_holding_exit(mode,aid,code,deadline['reason'])
+                    reason, fraction = deadline['reason'], 1.
                 if reason:
                     available = p['available']; minimum, step = lot(code)
                     qty = available if fraction == 1 else max(minimum, math.floor(available*fraction/step)*step)

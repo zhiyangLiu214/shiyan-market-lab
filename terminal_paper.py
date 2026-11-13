@@ -73,6 +73,9 @@ class PaperLedger:
             if 'cap' not in [r[1] for r in db.execute('PRAGMA table_info(accounts)')]:
                 db.execute('ALTER TABLE accounts ADD COLUMN cap REAL DEFAULT 70')
 
+            if 'holding_limit' not in [r[1] for r in db.execute('PRAGMA table_info(accounts)')]:
+                db.execute('ALTER TABLE accounts ADD COLUMN holding_limit INTEGER DEFAULT 1')
+
     @contextmanager
     def db(self):
         with self.lock:
@@ -111,6 +114,29 @@ class PaperLedger:
         with self.db() as db:
             db.execute('UPDATE accounts SET cap=? WHERE mode=? AND id=?', (cap, mode, account))
             db.execute('INSERT INTO paper_events VALUES(?,?,?)', (mode, clock(), f'{account}仓位上限调整为{cap}%'))
+
+    def set_holding_limit(self, mode, account, enabled):
+        if account not in ('main', 'scan') or type(enabled) is not bool:
+            raise ValueError('最长持仓设置无效')
+        with self.db() as db:
+            db.execute('UPDATE accounts SET holding_limit=? WHERE mode=? AND id=?',
+                       (int(enabled), mode, account))
+            if not enabled:
+                db.execute("UPDATE orders SET status='cancelled',result='最长持仓规则已关闭' WHERE mode=? AND account=? AND side='sell' AND status='pending' AND source='auto' AND reason LIKE '最长持仓退出%'", (mode, account))
+                for row in db.execute('SELECT rowid,plan FROM lots WHERE mode=? AND account=? AND qty>0', (mode, account)).fetchall():
+                    plan = json.loads(row['plan'])
+                    plan.pop('_holding_exit_reason', None)
+                    db.execute('UPDATE lots SET plan=? WHERE rowid=?', (json.dumps(plan), row['rowid']))
+            db.execute('INSERT INTO paper_events VALUES(?,?,?)',
+                       (mode, clock(), f'{account}最长持仓5个交易日规则'+('开启' if enabled else '关闭')))
+
+    def mark_holding_exit(self, mode, account, code, reason):
+        with self.db() as db:
+            for row in db.execute('SELECT rowid,plan FROM lots WHERE mode=? AND account=? AND code=? AND qty>0', (mode, account, code)).fetchall():
+                plan = json.loads(row['plan'])
+                if not plan.get('_holding_exit_reason'):
+                    plan['_holding_exit_reason'] = reason
+                    db.execute('UPDATE lots SET plan=? WHERE rowid=?', (json.dumps(plan), row['rowid']))
 
     def status(self, mode, text):
         with self.db() as db:
@@ -269,7 +295,10 @@ class PaperLedger:
                         db.execute("UPDATE orders SET status='rejected',result='成交前再次检查：资金、5只或仓位上限约束未通过' WHERE id=?", (order['id'],)); continue
                     # A later attempt must not use a future mark already loaded by this update.
                     db.execute('UPDATE accounts SET cash=cash-? WHERE mode=? AND id=?', (gross+fee, mode, order['account']))
-                    db.execute('INSERT INTO lots VALUES(?,?,?,?,?,?,?,?,?,?)', (mode, order['account'], order['code'], order['name'], qty, gross+fee, q['date'], order['plan'], price, stamp))
+                    fill_plan = json.loads(order['plan'])
+                    if order['code'] not in positions:
+                        fill_plan['_opened_at'] = stamp
+                    db.execute('INSERT INTO lots VALUES(?,?,?,?,?,?,?,?,?,?)', (mode, order['account'], order['code'], order['name'], qty, gross+fee, q['date'], json.dumps(fill_plan), price, stamp))
                 else:
                     p = positions.get(order['code'])
                     available = sum(l['qty'] for l in p['lots'] if l['day'] < q['date']) if p else 0
