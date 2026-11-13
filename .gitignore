@@ -28,6 +28,7 @@ htmlcov/
 /docs/*
 !/docs/development.md
 !/docs/DEPLOYMENT.md
+!/docs/strategy-simulation.md
 /research/*
 !/research/data-source-setup.md
 !/research/yeren_tech_catalog.json

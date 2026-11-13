@@ -21,10 +21,13 @@ from terminal_source_market import MarketRouter
 from terminal_notes import NoteStore, NoteConflict
 from terminal_search import StockSearch
 from terminal_mainline import MainlineService, demo_mainlines
+from terminal_strategy_sim import StrategyStore,StrategyEngine,checked_config,EXAMPLE
+from terminal_formula import FUNCTIONS
 
 from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_history,
                              demo_minutes, intraday_analysis, normalize_weights, now_text,
                              qualifies_momentum, scan_options, select_mainline_roles, validate_code)
+from terminal_engine import normalize_bars
 
 
 def register_terminal(app, load_boards, load_board_stocks):
@@ -372,6 +375,73 @@ def register_terminal(app, load_boards, load_board_stocks):
         except Exception:
             return jsonify(ok=False,error='模拟操作未完成，账本事务已回滚，请刷新核对'),503
 
+    def strategy_pool(kind,demo):
+        if kind=='scan':
+            data=paper_scan(demo)
+            return dict(ready=bool(data and data.get('complete')),items=(data or {}).get('items',[]),reason=(data or {}).get('reason','三维候选尚未就绪'))
+        data=market(demo)
+        ready=not any(data.get(k) for k in ('stale','readonly','loading','errors'))
+        items=[dict(s,board=g['name']) for g in data.get('groups',[]) if g.get('board_type') in ('main','secondary','trend') for s in g.get('leaders',[])]
+        return dict(ready=ready,items=items,reason='已确认主线/趋势的角色候选' if ready else '主线候选数据尚未完整确认')
+
+    strategy_store=StrategyStore(Path(app.root_path)/'.runtime'/'strategy-sim')
+    def strategy_read(code,mode,meta):
+        # Formula simulation consumes price/volume independently of the built-in
+        # funds-based strategies. A funds outage cannot block an OHLCV formula.
+        daily=get_detail(code,mode=='demo',meta.get('name',''),meta.get('board',''))
+        minute=get_minute(code,mode=='demo');points=minute.get('points',[]);stamp=minute.get('as_of','')
+        current=datetime.now(TZ).replace(tzinfo=None)
+        age=(current-datetime.strptime(stamp,'%Y-%m-%d %H:%M')).total_seconds() if stamp else float('inf')
+        time_of_day=current.strftime('%H:%M');source_time=stamp[11:16]
+        extended=(time_of_day>='15:00' and source_time>='14:59') or ('11:30'<=time_of_day<'13:01' and '11:29'<=source_time<='11:30')
+        valid=bool(points and minute.get('date')==current.strftime('%Y-%m-%d') and age>=0 and (age<=180 or extended))
+        frame=demo_history(code) if mode=='demo' else history(code)
+        data=normalize_bars(frame).tail(260)
+        rows=[]
+        for _,bar in data.iterrows():
+            row=dict(date=bar.date.strftime('%Y-%m-%d'),**{key:float(bar[key]) for key in ('open','high','low','close','volume')})
+            if 'amount' in data:row['amount']=float(bar.amount)
+            rows.append(row)
+        past=[r for r in rows if r['date']<minute.get('date','')]
+        return dict(valid=valid and len(rows)>=10,price=points[-1]['price'] if points else None,date=minute.get('date'),as_of=stamp,points=points,
+                    prev_close=past[-1]['close'] if past else None,minute=minute,
+                    daily=dict(daily,bars=rows,source=frame.attrs.get('source',daily.get('source'))))
+    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool)
+
+    @bp.get('/api/terminal/strategy-sim')
+    def strategy_state():
+        mode='demo' if request.args.get('mode')=='demo' else 'live';sid=request.args.get('id')
+        try:
+            if sid:
+                data=strategy_store.snapshot(sid)
+                if data['mode']!=mode:raise ValueError('策略不属于当前数据模式')
+            else:data=dict(items=strategy_store.list(mode),example=EXAMPLE,functions=sorted(FUNCTIONS),notices=strategy_store.notices(mode))
+            return jsonify(ok=True,data=data)
+        except ValueError as exc:return jsonify(ok=False,error=str(exc)),400
+
+    @bp.post('/api/terminal/strategy-sim')
+    def strategy_action():
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict):return jsonify(ok=False,error='策略请求格式无效'),400
+        mode='demo' if body.get('mode')=='demo' else 'live'
+        try:
+            action=body.get('action')
+            if action=='validate':data=dict(config=checked_config(body.get('config')),message='公式语法通过；执行前仍须检验行情与数据完整性')
+            elif action=='save':data=strategy_store.create(body.get('config'),mode)
+            else:
+                sid=body.get('id');item=strategy_store.get(sid)
+                if item['mode']!=mode:raise ValueError('策略不属于当前数据模式')
+                if action=='check':data=strategy_engine.request_check(sid)
+                elif action=='toggle':
+                    strategy_engine.toggle(sid,body.get('enabled'))
+                    if not os.environ.get('TDX_NO_PAPER_WORKER'):
+                        strategy_engine.ensure();strategy_engine.wakeup.set()
+                    data=strategy_store.snapshot(sid)
+                else:raise ValueError('未知策略操作')
+            return jsonify(ok=True,data=data)
+        except (ValueError,TypeError,KeyError) as exc:return jsonify(ok=False,error=str(exc)),400
+        except Exception:return jsonify(ok=False,error='本轮策略检查失败；未补造委托或成交，请检查行情后重试'),503
+
     notes = NoteStore(Path(app.root_path)/'.runtime'/'yeren-notes.sqlite3',
                       Path(app.root_path)/'research'/'yeren_tech_catalog.json')
 
@@ -397,4 +467,5 @@ def register_terminal(app, load_boards, load_board_stocks):
 
     if not os.environ.get('TDX_NO_PAPER_WORKER') and any(paper_ledger.snapshot(m)['run'] for m in ('live','demo')):
         paper.ensure()
+    if not os.environ.get('TDX_NO_PAPER_WORKER') and any(s['enabled'] for s in strategy_store.list('live')):strategy_engine.ensure()
     app.register_blueprint(bp)

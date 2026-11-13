@@ -88,13 +88,15 @@ class PaperLedger:
             finally:
                 db.close()
 
-    def start(self, mode, now=None):
+    def start(self, mode, now=None, accounts=('main','scan')):
         now = now or clock()
+        if not accounts or len(set(accounts))!=len(accounts) or any(a not in ('main','scan') for a in accounts):
+            raise ValueError('账户配置无效')
         with self.db() as db:
             if db.execute('SELECT 1 FROM runs WHERE mode=?', (mode,)).fetchone():
                 return
             db.execute('INSERT INTO runs VALUES(?,?,1,?)', (mode, now, '已启动，等待新行情'))
-            for account in ('main', 'scan'):
+            for account in accounts:
                 db.execute('INSERT INTO accounts(mode,id,cash,realized,peak,drawdown) VALUES(?,?,?,0,?,0)', (mode, account, INITIAL, INITIAL))
                 db.execute('INSERT INTO equity VALUES(?,?,?,?)', (mode, account, now, INITIAL))
 
