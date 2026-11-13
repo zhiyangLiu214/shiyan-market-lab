@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import akshare as ak
 import requests
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, send_file
 from terminal_funds import FundFlowService, demo_funds, missing
 from terminal_paper import PaperLedger, clock as paper_clock
 from terminal_paper_runner import PaperRunner
@@ -481,6 +481,15 @@ def register_terminal(app, load_boards, load_board_stocks):
             return jsonify(ok=True, data=backtests.get(run_id) if run_id else dict(items=backtests.list()))
         except (ValueError, FileNotFoundError):
             return jsonify(ok=False, error='回溯记录不存在'), 404
+
+    @bp.get('/api/terminal/backtests/export')
+    def backtest_export():
+        try:
+            file_type = request.args.get('format', 'json')
+            path = backtests.export_path(request.args.get('id'), file_type)
+            return send_file(path, as_attachment=True, download_name='historical-replay.'+file_type)
+        except (ValueError, FileNotFoundError):
+            return jsonify(ok=False, error='回溯文件不存在'), 404
 
     @bp.post('/api/terminal/backtests')
     def backtest_start():

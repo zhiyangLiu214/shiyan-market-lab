@@ -364,7 +364,18 @@ class BacktestStore:
         if not isinstance(run_id,str) or len(run_id)!=32 or any(c not in '0123456789abcdef' for c in run_id):
             raise ValueError('回溯编号无效')
         with self.lock:
-            return json.loads((self.root/run_id/'report.json').read_text())
+            report = json.loads((self.root/run_id/'report.json').read_text())
+            report['xlsx_available'] = (self.root/run_id/'detail.xlsx').is_file()
+            return report
+
+    def export_path(self, run_id, file_type):
+        self.get(run_id)
+        if file_type not in ('json', 'xlsx'):
+            raise ValueError('不支持的导出格式')
+        path = self.root/run_id/('detail.xlsx' if file_type == 'xlsx' else 'report.json')
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        return path.resolve()
 
     def start(self, ids, start, end):
         try:

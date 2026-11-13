@@ -51,6 +51,8 @@ function backtestResultHTML(report) {
     }).join('');
     return `<div class="panel backtest-notice"><b>${esc(report.start)} 至 ${esc(report.end)} · ${esc(report.progress)}</b>
         <p>14:30选股 · 收盘价买入 · 每套初始100,000元 · ${report.sessions?.length||0}个交易日${report.coverage_pct==null?'':' · 数据覆盖'+fmt(report.coverage_pct)+'%'}</p>
+        <p>历史回溯使用独立账本，结果仅保存在本页。</p>
+        ${report.id?`<p class="backtest-download"><a href="/api/terminal/backtests/export?id=${encodeURIComponent(report.id)}&format=json" download>下载完整数据（JSON）</a>${report.xlsx_available?`<a href="/api/terminal/backtests/export?id=${encodeURIComponent(report.id)}&format=xlsx" download>下载 Excel 明细</a>`:''}</p>`:''}
         ${partial?'<p class="down">存在数据缺口。当前收益仅代表已覆盖的样本，需补齐数据后复核。</p>':''}
         <details><summary>本次规则与数据范围</summary><p>${esc(report.universe_note||'')} · ${report.universe_count||0}只股票</p>${detail}</details>
         ${report.errors?.length?`<details><summary>查看数据缺口 · ${report.errors.length}条</summary><div class="backtest-scroll">${report.errors.map(row=>`<p>${esc(row.date||'全区间')} · ${esc(row.code)} · ${esc(row.reason)}</p>`).join('')}</div></details>`:''}

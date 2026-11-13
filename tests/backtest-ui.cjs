@@ -14,4 +14,8 @@ assert.match(html,/收益尚未核算完整/);
 assert.match(html,/&lt;策略>/);
 assert.match(html,/分钟缺失/);
 assert.doesNotMatch(html,/>0%/);
+const downloadable=context.backtestResultHTML({id:'a'.repeat(32),xlsx_available:true,results:[]});
+assert.match(downloadable,/format=xlsx/);
+assert.match(downloadable,/format=json/);
+assert.match(downloadable,/独立账本/);
 console.log('历史回溯：缺口、未完成收益和转义显示通过。');

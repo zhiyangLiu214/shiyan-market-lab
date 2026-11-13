@@ -109,6 +109,21 @@ class MinuteHistoryTests(unittest.TestCase):
             store=BacktestStore(root,None)
             with self.assertRaises(ValueError):store.start(['a'],'2099-01-01','2099-01-03')
 
+    def test_exports_are_confined_to_one_historical_run(self):
+        with tempfile.TemporaryDirectory() as root:
+            store=BacktestStore(root,None)
+            run_id='a'*32
+            run=Path(root)/run_id
+            run.mkdir()
+            (run/'report.json').write_text('{"status":"partial"}')
+            self.assertFalse(store.get(run_id)['xlsx_available'])
+            self.assertEqual(store.export_path(run_id,'json'),(run/'report.json').resolve())
+            with self.assertRaises(FileNotFoundError):store.export_path(run_id,'xlsx')
+            with self.assertRaises(ValueError):store.export_path('../accounts','json')
+            with self.assertRaises(ValueError):store.export_path(run_id,'../../account.sqlite3')
+            (run/'detail.xlsx').write_bytes(b'export')
+            self.assertTrue(store.get(run_id)['xlsx_available'])
+
 
 if __name__=='__main__':
     unittest.main()
