@@ -13,6 +13,7 @@ from pathlib import Path
 from terminal_formula import compile_formula,evaluate_formula,FormulaError
 from terminal_paper import PaperLedger,clock,session,lot,money,number
 from terminal_strategy_exit import exit_decision,PATTERNS
+from terminal_universe import BOARDS,in_boards
 
 EXAMPLE='MA5:=MA(C,5);\nMA20:=MA(C,20);\n选股:C>MA20 AND MA5>MA20 AND V>MA(V,5)*1.2;'
 
@@ -24,11 +25,15 @@ def checked_config(body):
     if not 1<=len(name)<=60 or len(description)>4000:raise ValueError('请填写策略名称；说明最多4000字')
     compile_formula(formula);compile_formula(ranking)
     pool=body.get('pool','custom')
-    if pool not in ('custom','main','scan'):raise ValueError('股票池无效')
+    if pool not in ('custom','main','scan','market'):raise ValueError('股票池无效')
+    boards=body.get('boards',list(BOARDS))
+    if not isinstance(boards,list) or not boards or any(b not in BOARDS for b in boards):raise ValueError('请至少选择沪深主板、创业板或科创板中的一个市场')
+    boards=list(dict.fromkeys(boards))
     codes=body.get('codes',[])
     if isinstance(codes,str):codes=[s for s in re.split(r'[\s,，;；]+',codes.strip()) if s]
     if not isinstance(codes,list) or any(not isinstance(c,str) or not re.fullmatch(r'[036]\d{5}',c) for c in codes):raise ValueError('股票池请输入沪深A股六位代码')
     codes=list(dict.fromkeys(codes))
+    if pool=='custom' and any(not in_boards(c,boards) for c in codes):raise ValueError('自定义股票代码超出已选市场范围')
     if len(codes)>50 or pool=='custom' and not codes:raise ValueError('自定义股票池须有1至50只股票')
     buy_time=body.get('buy_time','14:30')
     if not isinstance(buy_time,str) or not re.fullmatch(r'\d{2}:\d{2}',buy_time):raise ValueError('买入时间格式应为HH:MM')
@@ -44,7 +49,7 @@ def checked_config(body):
     if values['position_pct']>values['max_exposure']:raise ValueError('单股仓位不能超过总仓位')
     patterns=body.get('exit_patterns',['vwap_cross'])
     if not isinstance(patterns,list) or any(p not in PATTERNS for p in patterns):raise ValueError('辅助卖出条件无效')
-    return dict(name=name,description=description,formula=formula,ranking=ranking,pool=pool,codes=codes,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
+    return dict(name=name,description=description,formula=formula,ranking=ranking,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
                 **values,limit_up_trail=True,initial_cash=100000,buy_window_seconds=120)
 
 
@@ -71,7 +76,7 @@ class StrategyStore:
         if not isinstance(sid,str) or not re.fullmatch('[a-f0-9]{32}',sid):raise ValueError('策略编号无效')
         with self.db() as db:row=db.execute('SELECT * FROM strategies WHERE id=?',(sid,)).fetchone()
         if not row:raise ValueError('策略不存在')
-        item=dict(row);item['config']=json.loads(item['config']);item['result']=json.loads(item['result'] or '{}');return item
+        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['result']=json.loads(item['result'] or '{}');return item
 
     def list(self,mode):
         with self.db() as db:ids=[r[0] for r in db.execute('SELECT id FROM strategies WHERE mode=? ORDER BY created DESC,rowid DESC',(mode,))]
@@ -131,8 +136,9 @@ def exit_lines(position,quote,config,previous=None):
 
 
 class StrategyEngine:
-    def __init__(self,store,reader,pool_reader):
+    def __init__(self,store,reader,pool_reader,market_scan=None):
         self.store,self.reader,self.pool_reader=store,reader,pool_reader
+        self.market_scan=market_scan
         self.guards={};self.check_threads={};self.thread=None;self.wakeup=threading.Event()
 
     def ensure(self):
@@ -191,8 +197,13 @@ class StrategyEngine:
 
     def _pool(self,item):
         cfg=item['config']
-        if cfg['pool']=='custom':return dict(ready=True,items=[dict(code=c,name=c) for c in cfg['codes']],reason='自定义股票池')
-        return self.pool_reader(cfg['pool'],item['mode']=='demo')
+        if cfg['pool']=='custom':return dict(ready=True,items=[dict(code=c,name=c) for c in cfg['codes'] if in_boards(c,cfg.get('boards',list(BOARDS)))],reason='自定义股票池')
+        if cfg['pool']=='market':
+            if item['mode']=='demo':return dict(ready=False,items=[],reason='市场全范围扫描仅支持真实行情，演示样本不冒充全市场')
+            if not self.market_scan:return dict(ready=False,items=[],reason='市场扫描服务尚未配置')
+            return self.market_scan.request(item)
+        pool=self.pool_reader(cfg['pool'],item['mode']=='demo')
+        return dict(pool,items=[r for r in pool.get('items',[]) if in_boards(r['code'],cfg.get('boards',list(BOARDS)))])
 
     def _assessment(self,meta,q,item):
         row=dict(code=meta['code'],name=meta.get('name',meta['code']),matched=False,rank=None,data_ok=False)
@@ -218,7 +229,8 @@ class StrategyEngine:
             preparing=bool(not preview and item['enabled'] and session(now) and -120<=seconds<0 and not finished)
             # Formula preview is read-only. Outside the buy window only existing
             # holdings/pending orders need quotes; there is no catch-up buy.
-            needs_pool=preview or buying or preparing or bool(account and any(o['status']=='pending' and o['side']=='buy' for o in account['orders']))
+            market_preparing=bool(cfg['pool']=='market' and item['enabled'] and session(now) and seconds<120 and not finished)
+            needs_pool=preview or buying or preparing or market_preparing or bool(account and any(o['status']=='pending' and o['side']=='buy' for o in account['orders']))
             pool=self._pool(item) if needs_pool else dict(ready=False,items=[],reason='尚未到买入时间')
             items=pool.get('items',[])[:50]
             metas={s['code']:s for s in items}
@@ -292,8 +304,9 @@ class StrategyEngine:
                 elif buying and not valid:reasons.append('股票池或部分行情不完整，窗口内继续等待；不按残缺结果排名买入')
                 if seconds>=120 and not finished and datetime.strptime(now[:10],'%Y-%m-%d').weekday()<5:self.store.daily(sid,now[:10],'missed','已错过本日买入窗口，不补单')
             status='公式检查完成，不产生委托' if preview else '运行中；持仓退出持续检查，等待每日'+cfg['buy_time']+'买入'
+            if preview and cfg['pool']=='market':status=pool.get('reason','市场扫描后台检查中')+'；本次不会下单'
             if not preview and not session(clock()):status='非连续竞价时段，等待交易时段，不补买单'
             if not preview and reasons:status='；'.join(reasons[:3])
-            result=dict(items=assessments,holdings=holding_checks,pool_ready=pool.get('ready'),pool_reason=pool.get('reason'),preview=preview,submitted=len(submitted),as_of=clock(),scope='用户自定义股票池最多50只；主线/三维使用各自已完成候选池，不是全市场扫描')
+            result=dict(items=assessments,holdings=holding_checks,pool_ready=pool.get('ready'),pool_reason=pool.get('reason'),preview=preview,submitted=len(submitted),as_of=clock(),market_scan=pool.get('market_scan'),scope=('已选市场完整名录逐只检查；全部入选可查看，排序前50名再取实时分钟核验买入' if cfg['pool']=='market' else '按已选市场过滤；自定义池最多50只，主线/三维仅各自候选池'))
             self.store.record(sid,status,result)
             return self.store.snapshot(sid)
