@@ -9,7 +9,7 @@ import pandas as pd
 
 ALIASES={'C':'close','CLOSE':'close','O':'open','OPEN':'open','H':'high','HIGH':'high',
          'L':'low','LOW':'low','V':'volume','VOL':'volume','VOLUME':'volume','AMOUNT':'amount'}
-FUNCTIONS={'MA','EMA','SMA','REF','HHV','LLV','SUM','COUNT','EVERY','EXIST','CROSS','ABS','MAX','MIN','IF','BARSLAST','BARSCOUNT','CODELIKE','ZTPRICE'}
+FUNCTIONS={'MA','EMA','SMA','REF','HHV','LLV','SUM','COUNT','EVERY','EXIST','CROSS','ABS','MAX','MIN','IF','BARSLAST','BARSCOUNT','CODELIKE','NAMELIKE','ZTPRICE'}
 BINARY={ast.Add:operator.add,ast.Sub:operator.sub,ast.Mult:operator.mul,ast.Div:operator.truediv}
 COMPARE={ast.Gt:operator.gt,ast.GtE:operator.ge,ast.Lt:operator.lt,ast.LtE:operator.le,ast.Eq:operator.eq,ast.NotEq:operator.ne}
 
@@ -42,26 +42,28 @@ def compile_formula(text):
         if len(nodes)>300:raise FormulaError('公式过于复杂')
         allowed=(ast.Expression,ast.BinOp,ast.BoolOp,ast.UnaryOp,ast.Compare,ast.Call,ast.Name,ast.Constant,ast.Load,
                  ast.Add,ast.Sub,ast.Mult,ast.Div,ast.And,ast.Or,ast.Not,ast.UAdd,ast.USub,*COMPARE)
-        strings={id(call.args[0]) for call in nodes if isinstance(call,ast.Call) and isinstance(call.func,ast.Name) and call.func.id.upper()=='CODELIKE' and len(call.args)==1}
+        strings={id(call.args[0]):call.func.id.upper() for call in nodes if isinstance(call,ast.Call) and isinstance(call.func,ast.Name) and call.func.id.upper() in ('CODELIKE','NAMELIKE') and len(call.args)==1}
         for node in nodes:
             if not isinstance(node,allowed):raise FormulaError('不支持属性、下标、代码调用或该公式运算')
             if isinstance(node,ast.Name) and node.id.upper() not in known|FUNCTIONS:raise FormulaError('未定义或不支持的字段：'+node.id)
             if isinstance(node,ast.Constant) and id(node) in strings:
-                if not isinstance(node.value,str) or not re.fullmatch(r'\d{1,6}',node.value):raise FormulaError('CODELIKE仅支持1至6位数字代码前缀')
+                pattern=r'\d{1,6}' if strings[id(node)]=='CODELIKE' else r'[\w*·.\-]{1,30}'
+                if not isinstance(node.value,str) or not re.fullmatch(pattern,node.value):raise FormulaError('CODELIKE需要数字前缀；NAMELIKE需要1至30字名称前缀')
                 continue
             if isinstance(node,ast.Constant) and (type(node.value) not in (int,float,bool) or not math.isfinite(node.value) or abs(node.value)>1e12):
                 raise FormulaError('仅支持有限数值常量')
             if isinstance(node,ast.Call):
                 if not isinstance(node.func,ast.Name) or node.func.id.upper() not in FUNCTIONS or node.keywords:raise FormulaError('仅支持列出的公式函数')
-                expected=3 if node.func.id.upper() in ('SMA','IF') else 1 if node.func.id.upper() in ('ABS','BARSLAST','BARSCOUNT','CODELIKE') else 2
+                expected=3 if node.func.id.upper() in ('SMA','IF') else 1 if node.func.id.upper() in ('ABS','BARSLAST','BARSCOUNT','CODELIKE','NAMELIKE') else 2
                 if len(node.args)!=expected:raise FormulaError(node.func.id+'参数数量无效')
-                if node.func.id.upper()=='CODELIKE' and (not isinstance(node.args[0],ast.Constant) or not isinstance(node.args[0].value,str)):raise FormulaError('CODELIKE需要数字前缀字符串')
+                if node.func.id.upper() in ('CODELIKE','NAMELIKE') and (not isinstance(node.args[0],ast.Constant) or not isinstance(node.args[0].value,str)):raise FormulaError('CODELIKE/NAMELIKE需要前缀字符串')
         result.append((name,tree.body))
         if name:known.add(name)
     return result
 
 
-def evaluate_formula(text,bars,code=None):
+def evaluate_formula(text,bars,code=None,name=None):
+    stock_name=name
     statements=compile_formula(text);frame=pd.DataFrame(bars)
     if frame.empty:raise FormulaError('缺少日线数据')
     env={name:pd.to_numeric(frame[column],errors='coerce') for name,column in ALIASES.items() if column in frame}
@@ -104,6 +106,9 @@ def evaluate_formula(text,bars,code=None):
             if name=='CODELIKE':
                 if not isinstance(code,str) or not re.fullmatch(r'\d{6}',code):raise FormulaError('CODELIKE缺少有效股票代码上下文')
                 return code.startswith(node.args[0].value)
+            if name=='NAMELIKE':
+                if not isinstance(stock_name,str) or not stock_name.strip() or stock_name.strip()==code:raise FormulaError('NAMELIKE缺少已核验的股票名称上下文')
+                return stock_name.strip().casefold().startswith(node.args[0].value.casefold())
             if name=='IF':
                 condition=truth(run(node.args[0]));leftmask=condition.fillna(False);rightmask=(~condition).fillna(False)
                 # Evaluate only branches actually used, allowing guarded division.
@@ -113,7 +118,7 @@ def evaluate_formula(text,bars,code=None):
                 left=branch(node.args[1],leftmask);right=branch(node.args[2],rightmask)
                 return check(left.where(leftmask,right).mask(condition.isna()))
             args=[child(a) for a in node.args]
-            expected=3 if name in ('SMA','IF') else 1 if name in ('ABS','BARSLAST','BARSCOUNT','CODELIKE') else 2
+            expected=3 if name in ('SMA','IF') else 1 if name in ('ABS','BARSLAST','BARSCOUNT','CODELIKE','NAMELIKE') else 2
             if len(args)!=expected:raise FormulaError(name+'参数数量无效')
             x=series(args[0])
             if name=='BARSLAST':

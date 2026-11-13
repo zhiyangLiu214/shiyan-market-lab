@@ -56,6 +56,14 @@ class FullScanTests(unittest.TestCase):
             self.assertFalse(first['ready']);self.assertTrue(entered.wait(1));self.assertEqual(scan.snapshot('s')['status'],'running')
             gate.set();scan.jobs['s']['thread'].join(3);pool=scan._pool('s')
         self.assertFalse(pool['ready']);self.assertEqual(pool['items'],[]);self.assertEqual(pool['market_scan']['failed'],1)
+    def test_scan_passes_verified_name_to_formula(self):
+        universe=unittest.mock.Mock();universe.load.return_value=[dict(code='600001',name='*ST测试')]
+        scan=StrategyMarketScan(universe,lambda *a:dict(bars=[dict(date=DAY,close=10)],source='测试日线'))
+        c=cfg();c['formula']="NAMELIKE('*ST')"
+        with patch('terminal_strategy_scan.clock',return_value=DAY+' 14:00:00'):
+            scan.request(dict(id='s',mode='live',config=checked_config(c)));scan.jobs['s']['thread'].join(3);pool=scan._pool('s')
+        self.assertTrue(pool['ready']);self.assertEqual(len(pool['items']),1)
+
     def test_unavailable_roster_is_not_an_empty_success(self):
         universe=unittest.mock.Mock();universe.load.side_effect=ValueError('offline');scan=StrategyMarketScan(universe,None)
         scan.request(dict(id='s',mode='live',config=checked_config(cfg())));scan.jobs['s']['thread'].join(3)
