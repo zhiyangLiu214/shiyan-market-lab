@@ -19,7 +19,7 @@
 <script defer src="/static/strategy-sim.js?v=20261113"></script>
 <script defer src="/static/alerts.js"></script>
 <script defer src="/static/alerts-ui.js"></script>
-<script defer src="{{ url_for('static', filename='terminal.js', v='strategy-sim-20261113') }}"></script>
+<script defer src="{{ url_for('static', filename='terminal.js', v='strategy-markets-20261113') }}"></script>
 <script defer src="/static/sources.js?v=authorized-sources-20261113"></script>
 </head>
 <body>
@@ -80,7 +80,8 @@
       <label>执行公式<textarea name="formula" rows="5" maxlength="4000" required spellcheck="false"></textarea></label>
       <p class="sim-help">支持通达信风格 C/O/H/L/V/AMOUNT，MA、EMA、SMA、REF、HHV、LLV、SUM、COUNT、EVERY、EXIST、CROSS、ABS、MAX、MIN。AND/OR组合，:=定义变量，最后一条为选股结果。周期1–250；量为手、金额为元。中文方法由你提供后可转换为公式，说明文字不会自行执行；不支持的公式会报错，不会忽略。</p>
       <label>排序公式（结果从高到低；默认当日涨幅）<input name="ranking" maxlength="4000" required></label>
-      <label>选股范围<select name="pool"><option value="custom">自定义股票池（最多50只）</option><option value="main">当前已确认主线/趋势角色候选</option><option value="scan">当前三维选股≥85分候选</option></select></label>
+      <label>选股范围<select name="pool"><option value="market">已选市场全部股票（后台完整扫描）</option><option value="custom">自定义股票池（最多50只）</option><option value="main">当前已确认主线/趋势角色候选</option><option value="scan">当前三维选股≥85分候选</option></select></label>
+      <fieldset class="sim-patterns"><legend>市场范围（只包含所选市场的A股）</legend><label><input type="checkbox" name="boards" value="main" checked>沪深主板</label><label><input type="checkbox" name="boards" value="chinext" checked>创业板</label><label><input type="checkbox" name="boards" value="star" checked>科创板</label><p class="sim-help">默认三个市场全部勾选，排除北交所、B股、基金、债券等。市场扫描不受自定义池50只限制；耗时取决于行情服务，扫描进度与缺失单独显示。</p></fieldset>
       <label id="simCodesRow">股票代码（逗号、空格或换行分隔）<textarea name="codes" rows="2"></textarea></label>
       <div class="sim-fields"><label>每日买入时间（北京时间）<input name="buy_time" type="time" required></label><label>最多持仓只数<input name="max_positions" type="number" min="1" max="5" required></label><label>止盈观察线 %<input name="take_profit" type="number" min="0.1" max="200" step="0.1" required></label><label>基础止损 %<input name="stop_loss" type="number" min="0.1" max="50" step="0.1" required></label><label>单股资金分配 %<input name="position_pct" type="number" min="1" max="70" required></label><label>总仓位上限 %<input name="max_exposure" type="number" min="10" max="100" required></label></div>
       <details class="sim-patterns" open><summary>未达固定止盈线的浮盈保护卖点</summary><p class="sim-help">仅持仓浮盈时启用，彼此独立；默认勾选下穿均价线。</p><label><input type="checkbox" name="exit_patterns" value="vwap_cross">下穿分时均价线</label><label><input type="checkbox" name="exit_patterns" value="rebound_failure">反弹不过均价线后回落</label><label><input type="checkbox" name="exit_patterns" value="range_break">跌破分钟整理区前低</label><label><input type="checkbox" name="exit_patterns" value="spike_reversal">急涨拐头并跌破均价</label><p class="sim-help">量化近似：反弹看前5分钟至少3分钟低于均价、上根距均价≤0.2%后再次回落；整理区为前10分钟收盘振幅≤1%；急涨为前5分钟上涨≥2%、随后回落≥0.5%并低于均价。原文未提供数值，以上是本工具的待验证参数，不是原作者公式。</p></details>

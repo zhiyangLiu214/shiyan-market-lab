@@ -23,6 +23,8 @@ from terminal_search import StockSearch
 from terminal_mainline import MainlineService, demo_mainlines
 from terminal_strategy_sim import StrategyStore,StrategyEngine,checked_config,EXAMPLE
 from terminal_formula import FUNCTIONS
+from terminal_universe import StockUniverse
+from terminal_strategy_scan import StrategyMarketScan
 
 from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_history,
                              demo_minutes, intraday_analysis, normalize_weights, now_text,
@@ -406,7 +408,15 @@ def register_terminal(app, load_boards, load_board_stocks):
         return dict(valid=valid and len(rows)>=10,price=points[-1]['price'] if points else None,date=minute.get('date'),as_of=stamp,points=points,
                     prev_close=past[-1]['close'] if past else None,minute=minute,
                     daily=dict(daily,bars=rows,source=frame.attrs.get('source',daily.get('source'))))
-    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool)
+    def strategy_daily(code,mode,meta):
+        frame=history(code);data=normalize_bars(frame).tail(260);rows=[]
+        for _,bar in data.iterrows():
+            row=dict(date=bar.date.strftime('%Y-%m-%d'),**{key:float(bar[key]) for key in ('open','high','low','close','volume')})
+            if 'amount' in data:row['amount']=float(bar.amount)
+            rows.append(row)
+        return dict(bars=rows,source=frame.attrs.get('source'),as_of=frame.attrs.get('retrieved_at'))
+    strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily)
+    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan)
 
     @bp.get('/api/terminal/strategy-sim')
     def strategy_state():
@@ -414,6 +424,7 @@ def register_terminal(app, load_boards, load_board_stocks):
         try:
             if sid:
                 data=strategy_store.snapshot(sid)
+                data['market_scan']=strategy_market_scan.snapshot(sid)
                 if data['mode']!=mode:raise ValueError('策略不属于当前数据模式')
             else:data=dict(items=strategy_store.list(mode),example=EXAMPLE,functions=sorted(FUNCTIONS),notices=strategy_store.notices(mode))
             return jsonify(ok=True,data=data)
