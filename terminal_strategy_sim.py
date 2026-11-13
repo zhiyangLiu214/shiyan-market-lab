@@ -217,7 +217,7 @@ class StrategyEngine:
             bars=q['daily'].get('bars',[])
             if not bars or item['mode']!='demo' and bars[-1]['date']!=q['date']:raise FormulaError('缺少当日日线快照，不能用昨日数据代替')
             row['name']=q['daily'].get('name') or row['name'];row['source']=q['daily'].get('source');row['as_of']=q['as_of']
-            row['matched']=bool(evaluate_formula(item['config']['formula'],bars))
+            row['matched']=bool(evaluate_formula(item['config']['formula'],bars,code=meta['code']))
             if row['matched']:row.update(strategy_rank(item['config'],bars,meta['code'],row['name']))
             row['data_ok']=True;row['reason']='公式入选' if row['matched'] else '公式不满足'
         except (ValueError,TypeError,KeyError,ArithmeticError) as exc:row['reason']=str(exc)[:200]
