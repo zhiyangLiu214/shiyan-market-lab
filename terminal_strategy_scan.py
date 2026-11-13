@@ -50,7 +50,7 @@ class StrategyMarketScan:
                     quote=self.reader(meta['code'],item['mode'],meta)
                     bars=quote['bars'];row.update(source=quote.get('source'),as_of=quote.get('as_of'))
                     if not bars or bars[-1]['date']!=day:raise ValueError('缺少扫描当日的日线快照')
-                    row['matched']=bool(evaluate_formula(cfg['formula'],bars))
+                    row['matched']=bool(evaluate_formula(cfg['formula'],bars,code=meta['code']))
                     if row['matched']:row.update(strategy_rank(cfg,bars,meta['code'],meta['name']))
                     row.update(data_ok=True,reason='公式入选' if row['matched'] else '公式不满足')
                 except FormulaError as exc:
