@@ -134,6 +134,29 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(result['result']['items'][0]['matched'])
         self.assertTrue(result['result']['items'][0]['data_ok'])
 
+    def test_scheduled_market_scan_waits_for_ranking_past_two_minutes(self):
+        item = self.store.create(dict(config(), pool='market'), 'live')
+        self.sid = item['id']
+        scan = unittest.mock.Mock()
+        self.engine.market_scan = scan
+        scan.request.return_value = dict(ready=False, items=[], reason='正在扫描另一套策略')
+        self.now = DAY+' 14:29:10'
+        self.toggle()
+        self.tick()
+        scan.request.assert_not_called()
+        self.now = DAY+' 14:30:10'
+        self.tick()
+        self.assertEqual(self.store.daily(self.sid,DAY)['status'], 'scanning')
+        self.assertEqual(scan.request.call_args.kwargs['scheduled_for'], DAY+' 14:30:00')
+        self.now = DAY+' 14:38:10'
+        self.minute = '14:38'
+        scan.request.return_value = dict(ready=True, items=[dict(code='600001',name='测试股票')])
+        account = self.tick()['ledger']['accounts'][0]
+        self.assertEqual(len(account['orders']), 1)
+        self.assertEqual(account['orders'][0]['created'], self.now)
+        self.tick()
+        self.assertEqual(self.store.daily(self.sid,DAY)['status'], 'done')
+
     def test_scheduled_buy_forward_fill_one_account_and_no_duplicate(self):
         self.toggle();a=self.tick()['ledger']['accounts'][0]
         self.assertEqual(len(a['orders']),1);self.assertEqual(a['trades'],[])

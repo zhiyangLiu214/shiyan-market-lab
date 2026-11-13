@@ -23,14 +23,21 @@ class StrategyMarketScan:
         with self.lock:
             self.jobs.pop(sid, None)
 
-    def request(self,item):
+    def request(self,item,scheduled_for=None):
         sid=item['id'];now=clock();cfg=item['config']
         with self.lock:
             old=self.jobs.get(sid)
-            if old and old['status']=='running':return self._pool(sid)
-            if old and old.get('day')==now[:10] and time.monotonic()-old.get('finished_mono',0)<(300 if old['status']=='complete' else 120):return self._pool(sid)
+            same_run = old and (scheduled_for is None or old.get('scheduled_for') == scheduled_for)
+            if same_run and old['status'] == 'running':
+                return self._pool(sid)
+            if same_run and old.get('day') == now[:10]:
+                age = time.monotonic() - old.get('finished_mono', 0)
+                if scheduled_for and old['status'] == 'complete' and not old['failed']:
+                    return self._pool(sid)
+                if age < (300 if old['status'] == 'complete' else 120):
+                    return self._pool(sid)
             if self.active is not None:return dict(ready=False,items=[],reason='正在扫描另一套市场策略，稍后重试',market_scan=self.snapshot(sid))
-            job=dict(status='running',day=now[:10],started=now,checked=now,total=0,done=0,failed=0,excluded=0,matched=0,rows=[],source='上交所股票名录 + 深交所A股名录',reason='正在读取完整市场名录',boards=cfg['boards'])
+            job=dict(status='running',scheduled_for=scheduled_for,day=now[:10],started=now,checked=now,total=0,done=0,failed=0,excluded=0,matched=0,rows=[],source='上交所股票名录 + 深交所A股名录',reason='正在读取完整市场名录',boards=cfg['boards'])
             self.jobs[sid]=job;self.active=sid
             thread=threading.Thread(target=self._run,args=(item,job),daemon=True,name='strategy-market-scan');job['thread']=thread;thread.start()
             return self._pool(sid)

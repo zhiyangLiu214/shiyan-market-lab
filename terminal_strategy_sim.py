@@ -55,7 +55,7 @@ def checked_config(body):
     patterns=body.get('exit_patterns',['vwap_cross'])
     if not isinstance(patterns,list) or any(p not in PATTERNS for p in patterns):raise ValueError('辅助卖出条件无效')
     return dict(name=name,description=description,formula=formula,ranking=ranking,ranking_mode=ranking_mode,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
-                **values,limit_up_trail=True,initial_cash=100000,buy_window_seconds=120)
+                **values,limit_up_trail=True,initial_cash=100000,scan_trigger_seconds=120)
 
 
 class StrategyStore:
@@ -81,7 +81,7 @@ class StrategyStore:
         if not isinstance(sid,str) or not re.fullmatch('[a-f0-9]{32}',sid):raise ValueError('策略编号无效')
         with self.db() as db:row=db.execute('SELECT * FROM strategies WHERE id=?',(sid,)).fetchone()
         if not row or row['mode'].startswith('archived'):raise ValueError('策略不存在或已删除')
-        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['result']=json.loads(item['result'] or '{}');return item
+        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['config'].pop('buy_window_seconds',None);item['config'].setdefault('scan_trigger_seconds',120);item['result']=json.loads(item['result'] or '{}');return item
 
     def list(self,mode):
         with self.db() as db:ids=[r[0] for r in db.execute('SELECT id FROM strategies WHERE mode=? ORDER BY created DESC,rowid DESC',(mode,))]
@@ -228,13 +228,13 @@ class StrategyEngine:
             if not self.store.get(sid)['enabled']:raise ValueError('策略已暂停，不再提交委托')
             return book.submit(*args)
 
-    def _pool(self,item):
+    def _pool(self,item,scheduled_for=None):
         cfg=item['config']
         if cfg['pool']=='custom':return dict(ready=True,items=[dict(code=c,name=c) for c in cfg['codes'] if in_boards(c,cfg.get('boards',list(BOARDS)))],reason='自定义股票池')
         if cfg['pool']=='market':
             if item['mode']=='demo':return dict(ready=False,items=[],reason='市场全范围扫描仅支持真实行情，演示样本不冒充全市场')
             if not self.market_scan:return dict(ready=False,items=[],reason='市场扫描服务尚未配置')
-            return self.market_scan.request(item)
+            return self.market_scan.request(item,scheduled_for=scheduled_for)
         pool=self.pool_reader(cfg['pool'],item['mode']=='demo')
         return dict(pool,items=[r for r in pool.get('items',[]) if in_boards(r['code'],cfg.get('boards',list(BOARDS)))])
 
@@ -260,13 +260,18 @@ class StrategyEngine:
             target=now[:10]+' '+cfg['buy_time']+':00'
             seconds=(datetime.strptime(now,'%Y-%m-%d %H:%M:%S')-datetime.strptime(target,'%Y-%m-%d %H:%M:%S')).total_seconds()
             previous=self.store.daily(sid,now[:10]);finished=bool(previous and previous['status'] in ('done','missed'))
-            buying=bool(not preview and item['enabled'] and session(now) and 0<=seconds<120 and not finished)
-            preparing=bool(not preview and item['enabled'] and session(now) and -120<=seconds<0 and not finished)
-            # Formula preview is read-only. Outside the buy window only existing
-            # holdings/pending orders need quotes; there is no catch-up buy.
-            market_preparing=bool(cfg['pool']=='market' and item['enabled'] and session(now) and seconds<120 and not finished)
-            needs_pool=preview or buying or preparing or market_preparing or bool(account and any(o['status']=='pending' and o['side']=='buy' for o in account['orders']))
-            pool=self._pool(item) if needs_pool else dict(ready=False,items=[],reason='尚未到买入时间')
+            # Persist the trigger before requesting the shared scanner. A queued
+            # strategy or a long scan can then continue across scheduler ticks.
+            admitted = bool(previous and previous['status'] == 'scanning')
+            auto = not preview and item['enabled'] and account is not None
+            if auto and not finished and not admitted and session(now) and 0 <= seconds < cfg['scan_trigger_seconds']:
+                self.store.daily(sid,now[:10],'scanning','已到选股时间，等待完成本轮选股')
+                admitted = True
+            buying = auto and admitted and not finished and seconds >= 0 and session(now)
+            pending_buys = account and any(o['status']=='pending' and o['side']=='buy' for o in account['orders'])
+            needs_pool = preview or buying or pending_buys
+            scheduled_for = target if not preview and (buying or pending_buys) else None
+            pool=self._pool(item,scheduled_for) if needs_pool else dict(ready=False,items=[],reason='等待每日选股时间')
             items=pool.get('items',[])[:50]
             metas={s['code']:s for s in items}
             if account:
@@ -317,9 +322,9 @@ class StrategyEngine:
                         try:
                             oid=self._submit(sid,book,mode,'main',position['code'],position['name'],'sell',position['available'],q['price'],q['as_of'],dict(position['plan'],**lines),why,'auto',clock());submitted.append(oid);pending.add(position['code'])
                         except ValueError as exc:reasons.append(str(exc))
-                # Quote collection may overrun the window. Never backdate orders.
-                current=clock();still_window=target<=current and (datetime.strptime(current,'%Y-%m-%d %H:%M:%S')-datetime.strptime(target,'%Y-%m-%d %H:%M:%S')).total_seconds()<120 and session(current)
-                if buying and still_window and valid:
+                current = clock()
+                can_submit = current[:10] == now[:10] and current >= target and session(current)
+                if buying and can_submit and valid:
                     ordered=sorted([r for r in assessments if r['matched']],key=lambda r:(-r['rank'],r['code']))
                     positions={p['code']:p for p in account['positions']};reserved=set(positions)|pending
                     for row in ordered:
@@ -333,13 +338,20 @@ class StrategyEngine:
                         if qty<minimum:row['reason']='资金分配不足最小买入数量';continue
                         plan=dict(date=q['date'],stop=q['price']*(1-cfg['stop_loss']/100),target1=q['price']*(1+cfg['take_profit']/100))
                         try:
-                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,('定时买入；自定义选股公式成立；'+('综合评分 '+str(row['rank'])+' 分优先' if cfg.get('ranking_mode')=='composite' else '自定义排序值 '+str(row['rank']))),'auto',clock())
+                            submitted_at = clock()
+                            if submitted_at[:10] != now[:10] or not session(submitted_at):break
+                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,('定时买入；自定义选股公式成立；'+('综合评分 '+str(row['rank'])+' 分优先' if cfg.get('ranking_mode')=='composite' else '自定义排序值 '+str(row['rank']))),'auto',submitted_at)
                             submitted.append(oid);reserved.add(code);row['reason']='已提交，等待后续新分钟成交'
                         except ValueError as exc:row['reason']=str(exc)
                     self.store.daily(sid,now[:10],'done','已完成本日定时检查，不重复买入')
-                elif buying and not valid:reasons.append('股票池或部分行情不完整，窗口内继续等待；不按残缺结果排名买入')
-                if seconds>=120 and not finished and datetime.strptime(now[:10],'%Y-%m-%d').weekday()<5:self.store.daily(sid,now[:10],'missed','已错过本日买入窗口，不补单')
-            status='公式检查完成，不产生委托' if preview else '运行中；持仓退出持续检查，等待每日'+cfg['buy_time']+'买入'
+                elif buying and not valid:
+                    reasons.append(pool.get('reason') if not pool.get('ready') else '候选行情待复核')
+                if not finished and seconds>=0 and datetime.strptime(now[:10],'%Y-%m-%d').weekday()<5:
+                    if now[11:16]>='14:57' or (not admitted and seconds>=cfg['scan_trigger_seconds']):
+                        self.store.daily(sid,now[:10],'missed','本日选股未触发或未在连续竞价结束前完成')
+            status='公式检查完成，不产生委托' if preview else '运行中，等待每日'+cfg['buy_time']+'开始选股'
+            if not preview and (finished or buying and can_submit and valid):
+                status='本日定时选股已结束，继续监控持仓'
             if preview and cfg['pool']=='market':status=pool.get('reason','市场扫描后台检查中')+'；本次不会下单'
             if not preview and not session(clock()):status='非连续竞价时段，等待交易时段，不补买单'
             if not preview and reasons:status='；'.join(reasons[:3])
