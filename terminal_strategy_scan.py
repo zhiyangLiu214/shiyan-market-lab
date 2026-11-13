@@ -48,7 +48,7 @@ class StrategyMarketScan:
                 row=dict(meta,matched=False,rank=None,data_ok=False)
                 try:
                     quote=self.reader(meta['code'],item['mode'],meta)
-                    bars=quote['bars'];row.update(source=quote.get('source'),as_of=quote.get('as_of'))
+                    bars=quote['bars'];row.update(source=quote.get('source'),as_of=quote.get('as_of'),adjustment=quote.get('adjustment'),bar_count=len(bars))
                     if not bars or bars[-1]['date']!=day:raise ValueError('缺少扫描当日的日线快照')
                     row['matched']=bool(evaluate_formula(cfg['formula'],bars,code=meta['code'],name=meta['name']))
                     if row['matched']:row.update(strategy_rank(cfg,bars,meta['code'],meta['name']))

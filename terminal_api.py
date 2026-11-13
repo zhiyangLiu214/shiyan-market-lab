@@ -43,13 +43,13 @@ def register_terminal(app, load_boards, load_board_stocks):
     mainline = MainlineService(funds)
     fund_router=MarketRouter(mainline,quotes)
 
-    def history(code):
-        revision=quotes.revision;key=(code,revision)
+    def history(code,adjustment='none'):
+        revision=quotes.revision;key=(code,revision,adjustment)
         with lock:
             entry = history_cache.get(key)
         if entry and time.time() - entry[0] < 25:
             return entry[1].copy()
-        data=quotes.fetch('daily',code)
+        data=quotes.fetch('daily_qfq' if adjustment=='qfq' else 'daily',code)
         with lock:
             if len(history_cache) > 256:
                 history_cache.clear()
@@ -387,6 +387,16 @@ def register_terminal(app, load_boards, load_board_stocks):
         return dict(ready=ready,items=items,reason='已确认主线/趋势的角色候选' if ready else '主线候选数据尚未完整确认')
 
     strategy_store=StrategyStore(Path(app.root_path)/'.runtime'/'strategy-sim')
+    def strategy_formula_daily(code):
+        frame=history(code,'qfq')
+        if frame.attrs.get('adjustment')!='qfq':raise ValueError('前复权口径未确认')
+        data=normalize_bars(frame).tail(500);rows=[]
+        for _,bar in data.iterrows():
+            row=dict(date=bar.date.strftime('%Y-%m-%d'),**{key:float(bar[key]) for key in ('open','high','low','close','volume')})
+            if 'amount' in data:row['amount']=float(bar.amount)
+            rows.append(row)
+        return dict(bars=rows,source=frame.attrs.get('source'),as_of=frame.attrs.get('retrieved_at'),adjustment='qfq')
+
     def strategy_read(code,mode,meta):
         # Formula simulation consumes price/volume independently of the built-in
         # funds-based strategies. A funds outage cannot block an OHLCV formula.
@@ -405,16 +415,18 @@ def register_terminal(app, load_boards, load_board_stocks):
             if 'amount' in data:row['amount']=float(bar.amount)
             rows.append(row)
         past=[r for r in rows if r['date']<minute.get('date','')]
+        # Keep execution prices and historical limit protection unadjusted.
+        # An adjusted-feed outage must not disable held-position monitoring.
+        formula=dict(bars=rows,source=daily.get('source'),adjustment='demo')
+        if mode!='demo':
+            try:formula=strategy_formula_daily(code)
+            except Exception:formula=dict(bars=[],source=None,adjustment='qfq',error='前复权日线获取失败，无法核验选股公式')
         return dict(valid=valid and len(rows)>=10,price=points[-1]['price'] if points else None,date=minute.get('date'),as_of=stamp,points=points,
                     prev_close=past[-1]['close'] if past else None,minute=minute,
-                    daily=dict(daily,bars=rows,source=frame.attrs.get('source',daily.get('source'))))
+                    daily=dict(daily,bars=rows,source=frame.attrs.get('source',daily.get('source')),
+                               formula_bars=formula['bars'],formula_source=formula['source'],formula_adjustment=formula['adjustment'],formula_error=formula.get('error')))
     def strategy_daily(code,mode,meta):
-        frame=history(code);data=normalize_bars(frame).tail(260);rows=[]
-        for _,bar in data.iterrows():
-            row=dict(date=bar.date.strftime('%Y-%m-%d'),**{key:float(bar[key]) for key in ('open','high','low','close','volume')})
-            if 'amount' in data:row['amount']=float(bar.amount)
-            rows.append(row)
-        return dict(bars=rows,source=frame.attrs.get('source'),as_of=frame.attrs.get('retrieved_at'))
+        return strategy_formula_daily(code)
     strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily)
     strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan)
 
