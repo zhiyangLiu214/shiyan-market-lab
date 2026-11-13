@@ -17,7 +17,7 @@ import requests
 from terminal_formula import evaluate_formula, FormulaError
 from terminal_holding import holding_deadline
 from terminal_formula_prefilter import might_match
-from terminal_paper import fees, lot, money, clock
+from terminal_paper import fees, lot, money, clock, FEE_SCHEDULE
 from terminal_strategy_exit import exit_decision
 from terminal_strategy_rank import strategy_rank
 from terminal_strategy_sim import exit_lines
@@ -37,6 +37,17 @@ def write_json(path, data):
 def daily_rows(values):
     return [dict(date=row[0], open=float(row[1]), close=float(row[2]),
                  high=float(row[3]), low=float(row[4]), volume=float(row[5])) for row in values]
+
+
+def sina_intraday_rows(payload):
+    # Parse the public JSONP payload as JSON, never execute its wrapper.
+    start, end = payload.find('(['), payload.rfind(']);')
+    if start < 0 or end < start:
+        raise ValueError('新浪历史分钟响应无有效数据')
+    values = json.loads(payload[start+1:end+1])
+    return [[row['day'][:16].replace('-', '').replace(' ', '').replace(':', ''),
+             float(row['open']), float(row['close']), float(row['high']),
+             float(row['low']), float(row['volume'])/100] for row in values]
 
 
 def selection_bars(daily, intraday, day):
@@ -77,19 +88,23 @@ class HistoricalData:
 
     def daily(self, code):
         path = self.root / 'daily' / (code + '.json')
+        cached = {}
         if path.exists():
             data = json.loads(path.read_text())
-            if data.get('raw') and (data['raw'][-1][0] >= self.end or data.get('retrieved_at','')[:10] >= self.end) and data['raw'][0][0] <= self.start:
+            cached = data
+            if data.get('raw') and (data['raw'][-1][0] >= self.end or data.get('retrieved_at','')[:10] >= self.end) and (data['raw'][0][0] <= self.start or data.get('requested_start','9999') <= self.start):
                 return data
         sym = ('sh' if code.startswith('6') else 'sz') + code
         url = 'https://web.ifzq.gtimg.cn/appstock/app/'
-        adjusted = self.http().get(url + 'fqkline/get',
-                                   params={'param': f'{sym},day,,,640,qfq'}, timeout=10).json()['data'][sym]
+        adjusted = {'qfqday':cached.get('qfq')} if cached.get('retrieved_at','')[:10] >= self.end else {}
+        if not adjusted.get('qfqday'):
+            adjusted = self.http().get(url + 'fqkline/get',
+                                       params={'param': f'{sym},day,,,640,qfq'}, timeout=10).json()['data'][sym]
         if not adjusted.get('qfqday'):
             raise ValueError('数据源未返回明确的前复权日线')
         raw = self.http().get(url + 'kline/kline',
                              params={'param': f'{sym},day,,,640'}, timeout=10).json()['data'][sym]['day']
-        data = dict(qfq=adjusted['qfqday'], raw=raw, source='腾讯明确前复权及不复权日线',
+        data = dict(qfq=adjusted['qfqday'], raw=raw, source='腾讯明确前复权及不复权日线', requested_start=self.start,
                     retrieved_at=datetime.now().isoformat(timespec='seconds'))
         write_json(path, data)
         return data
@@ -105,10 +120,21 @@ class HistoricalData:
             if data and data[0][0][:8] <= self.start.replace('-', '') and data[-1][0][:8] >= self.end.replace('-', ''):
                 return data
         sym = ('sh' if code.startswith('6') else 'sz') + code
-        data = self.http().get('https://ifzq.gtimg.cn/appstock/app/kline/mkline',
-                              params={'param': f'{sym},m30,,640'}, timeout=10).json()['data'][sym]['m30']
-        data = [row[:6] for row in data]
-        write_json(path, dict(rows=data,requested_start=self.start,retrieved_at=clock(),source='腾讯30分钟K线'))
+        data, source = [], ''
+        if (datetime.strptime(self.end,'%Y-%m-%d')-datetime.strptime(self.start,'%Y-%m-%d')).days <= 45:
+            try:
+                data = self.http().get('https://ifzq.gtimg.cn/appstock/app/kline/mkline',
+                                      params={'param': f'{sym},m30,,640'}, timeout=10).json()['data'][sym]['m30']
+                data = [row[:6] for row in data]
+                source = '腾讯30分钟K线'
+            except (requests.RequestException, ValueError, KeyError):
+                pass
+        if not data or data[0][0][:8] > self.start.replace('-',''):
+            payload = self.http().get('https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData',
+                                      params={'symbol':sym,'scale':30,'ma':'no','datalen':1970}, timeout=15).text
+            data = sina_intraday_rows(payload)
+            source = '新浪30分钟K线（成交股数转换为手）'
+        write_json(path, dict(rows=data,requested_start=self.start,retrieved_at=clock(),source=source))
         return data
 
     def ticks(self, code, day):
@@ -297,8 +323,8 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
             nav = cash+value
             budget = min(nav*cfg['position_pct']/100, nav*cfg['max_exposure']/100-value, cash)
             minimum, step = lot(code)
-            qty = math.floor((budget-6)/price/step)*step
-            while qty >= minimum and (qty*price+sum(fees(qty*price,'buy').values()) > cash or
+            qty = math.floor(budget/price/step)*step
+            while qty >= minimum and (qty*price+sum(fees(qty*price,'buy').values()) > budget or
                     value+qty*price > (nav-sum(fees(qty*price,'buy').values()))*cfg['max_exposure']/100):
                 qty -= step
             if qty < minimum:
@@ -382,8 +408,8 @@ class BacktestStore:
             left, right = datetime.strptime(start,'%Y-%m-%d'), datetime.strptime(end,'%Y-%m-%d')
         except (TypeError, ValueError):
             raise ValueError('请选择有效起止日期') from None
-        if left>right or (right-left).days>90 or (end>clock()[:10] or end==clock()[:10] and clock()[11:16]<'16:00'):
-            raise ValueError('区间最多90个自然日，截止日期须为已收盘日期')
+        if left>right or (right-left).days>366 or (end>clock()[:10] or end==clock()[:10] and clock()[11:16]<'16:00'):
+            raise ValueError('区间最多366个自然日，截止日期须为已收盘日期')
         if not isinstance(ids,list) or not 1<=len(ids)<=3 or any(not isinstance(sid,str) for sid in ids) or len(set(ids))!=len(ids):
             raise ValueError('请选择1至3套策略')
         strategies = [copy.deepcopy(self.strategies.get(sid)) for sid in ids]
@@ -431,6 +457,7 @@ class BacktestStore:
             if not dates:raise ValueError('所选日期没有可核验的交易日')
             report['sessions']=dates
             report['universe_count']=len(roster)
+            report['fee_schedule']=dict(FEE_SCHEDULE)
             report['universe_note']='当前交易所名录及当前名称回溯，未重建历史退市名单和ST名称变更'
             report['assumptions']=[
                 '14:30由当日前7根30分钟K线构造未收盘日K，历史最多499根前复权日K',
@@ -438,7 +465,7 @@ class BacktestStore:
                 '买入按收盘价，资金、排名、最多持仓和仓位上限按保存配置，收盘涨停不假定买入',
                 '卖出按历史分笔聚合的完整分钟信号，下一分钟价减0.05%滑点，成交量5%限制，T+1',
                 '分时均价由历史分笔成交量加权计算，分笔量与日线量核验，分钟内回封仍有粒度误差',
-                '费用沿用模拟账户，收益包含期末持仓市值，回撤按每日收盘权益计算',
+                '佣金双向万1、每笔最低1元；过户费双向万0.1，卖出印花税万5；收益含期末市值，回撤按日收盘权益计算',
                 '5交易日开关沿用各套设置，买入日算第1日，第5日14:54起退出，连续封板延持',
                 '持有期权益分派需补充股数与现金处理，遇到因子变化会停止该套收益计算']
             matches=[]

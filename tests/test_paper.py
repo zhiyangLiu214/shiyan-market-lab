@@ -7,6 +7,11 @@ DAY='2026-11-11'
 PLAN=dict(date=DAY,stop=9,target1=12,target2=14)
 
 class PaperTests(unittest.TestCase):
+    def test_one_basis_point_commission_and_one_yuan_minimum(self):
+        self.assertEqual(fees(10000,'buy'),dict(commission=1.,transfer=.1,stamp=0.))
+        self.assertEqual(fees(10000,'sell'),dict(commission=1.,transfer=.1,stamp=5.))
+        self.assertEqual(fees(500,'buy')['commission'],1.)
+        self.assertEqual(fees(20000,'buy')['commission'],2.)
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.ledger=PaperLedger(Path(self.tmp.name)/'paper.sqlite3')
@@ -65,7 +70,7 @@ class PaperTests(unittest.TestCase):
         a=self.account();self.assertEqual(a['positions'],[])
         self.assertAlmostEqual(a['realized'],a['pnl'],places=2)
         self.assertEqual(a['sell_win_rate'],100)
-        self.assertGreater(a['fees'],10)
+        self.assertAlmostEqual(a['fees'],2.57,places=2)
     def test_recheck_cap_when_price_moves_and_cancel(self):
         oid=self.order(qty=6500)
         self.ledger.update('live',{'600001':self.quote(price=10.9,prev=11)},DAY+' 10:02:00')

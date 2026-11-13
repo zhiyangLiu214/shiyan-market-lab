@@ -18,4 +18,7 @@ const downloadable=context.backtestResultHTML({id:'a'.repeat(32),xlsx_available:
 assert.match(downloadable,/format=xlsx/);
 assert.match(downloadable,/format=json/);
 assert.match(downloadable,/独立账本/);
+const fees=context.backtestResultHTML({results:[],fee_schedule:{commission_rate:.0001,minimum_commission:1,transfer_rate:.00001,sell_stamp_rate:.0005}});
+assert.match(fees,/双向万1/);
+assert.match(fees,/每笔最低1元/);
 console.log('历史回溯：缺口、未完成收益和转义显示通过。');
