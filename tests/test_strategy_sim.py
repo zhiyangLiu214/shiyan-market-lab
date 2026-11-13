@@ -132,6 +132,25 @@ class EngineTests(unittest.TestCase):
         self.sid=other['id'];self.toggle()
         a=self.store.snapshot(self.sid)['ledger']['accounts'][0]
         self.assertEqual(a['cash'],100000);self.assertEqual(a['orders'],[])
+    def test_three_custom_accounts_run_alongside_original_two(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from terminal_paper import PaperLedger
+        original=PaperLedger(Path(self.tmp.name)/'original.sqlite3');original.start('live',self.now)
+        before=original.snapshot('live',self.now)
+        ids=[self.sid]+[self.store.create(dict(config(),name='策略'+str(i)),'live')['id'] for i in range(2)]
+        with patch('terminal_strategy_sim.clock',side_effect=lambda:self.now),patch('terminal_paper.clock',side_effect=lambda:self.now):
+            for sid in ids:self.engine.toggle(sid,True)
+            with ThreadPoolExecutor(max_workers=3) as executor:results=list(executor.map(self.engine.tick,ids))
+            fourth=self.store.create(dict(config(),name='第四套'),'live')
+            with self.assertRaisesRegex(ValueError,'3套'):self.engine.toggle(fourth['id'],True)
+        self.assertEqual(len(original.snapshot('live',self.now)['accounts']),2)
+        self.assertEqual(original.snapshot('live',self.now),before)
+        for result in results:
+            self.assertEqual(len(result['ledger']['accounts']),1)
+            account=result['ledger']['accounts'][0]
+            self.assertEqual(account['cash'],100000);self.assertEqual(len(account['orders']),1)
+        self.assertEqual(len({r['ledger']['accounts'][0]['orders'][0]['id'] for r in results}),3)
+
     def test_limit_notice_break_intent_waits_for_t1_then_sells_forward(self):
         self.toggle();self.tick()
         self.now=DAY+' 14:32:10';self.minute='14:31';self.tick()

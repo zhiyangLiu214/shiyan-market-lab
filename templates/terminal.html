@@ -15,11 +15,11 @@
 <link rel="stylesheet" href="/static/notes.css">
 <script defer src="/static/notes.js"></script>
 <script defer src="/static/paper.js?v=entry-reasons-20261113"></script>
-<link rel="stylesheet" href="/static/strategy-sim.css?v=20261113">
-<script defer src="/static/strategy-sim.js?v=20261113"></script>
+<link rel="stylesheet" href="/static/strategy-sim.css?v=three-20261113">
+<script defer src="/static/strategy-sim.js?v=three-20261113"></script>
 <script defer src="/static/alerts.js"></script>
 <script defer src="/static/alerts-ui.js"></script>
-<script defer src="{{ url_for('static', filename='terminal.js', v='strategy-markets-20261113') }}"></script>
+<script defer src="{{ url_for('static', filename='terminal.js', v='strategy-three-20261113') }}"></script>
 <script defer src="/static/sources.js?v=authorized-sources-20261113"></script>
 </head>
 <body>
@@ -72,9 +72,9 @@
   </section>
   <section id="paperPage" class="page" hidden><div class="panel paper-toolbar"><div><h2>双账户同步对照</h2><p id="paperRunStatus">等待账本</p></div><button class="button gold" id="paperStart">同时启动两个10万元账户</button><button class="button" id="paperToggle" hidden>暂停自动策略</button></div><p id="paperError" role="status"></p><details class="panel paper-method"><summary>查看模拟执行规则与数据范围</summary><p>两个账户独立，各初始10万元、最多5只，默认仓位上限70%（可单独调整并记录）。涨价可能导致被动超限，系统在可卖时回收风险，T+1可能暂时阻止减仓。今日主线账户只从主线候选池买入；三维账户只从独立扫描综合分≥85的池买入，固定40/30/30权重、板块涨幅≥2%、基础动量≥5只，不跟随页面临时权重变化。</p><p>相同执行规则：首次试仓约净资产10%，浮盈后加仓约5%，自动买入后单股不超过20%；近期弱转强或均价承接、价格在均价上方、同日主力净额与占比为正、当前日线计划未触及目标/止损且剩余盈亏比≥1.5。技术失效退出；首压力仅首次减半止盈，第二压力退出剩余持仓；两根分钟低于均价且同日主力净流出则减半。持仓计划在首次买入委托时固定；同一分时信号不重复加仓。市场未给机会时允许空仓。</p><p>筛选池动态更新：待买单成交前复核池内资格、资金、信号与盈亏比；完整快照确认退出池后撤销待买单。行情或扫描不完整时暂停判断，不当作离池。持仓仅排名变化不卖出；连续3次完整快照离池、跨度≥2分钟，且价格与资金转弱、账户名额或资金受限、新候选符合入场条件且剩余盈亏比≥2时，每轮最多选择一只腾仓。先卖出实际模拟成交，才释放名额及资金；新股届时重新验证。候选优先满足执行条件、未持有及剩余空间，卖出后30分钟不自动重买。</p><p>信号产生后提交委托，只用后续轮询首次观察到的新完整分钟价模拟；不回填漏掉的成交。估值与策略约30秒轮询，分钟源可能延迟。连续竞价模拟时段9:31–11:30、13:01–14:57，排除集合竞价与盘后。T+1，普通A股买入100股整数倍，科创板最低200股；每笔数量不超过该分钟成交量5%，触及涨停不假定可买、跌停不假定可卖。无深度委托队列，不模拟真实撮合；不足10根日线、ST和北交所暂不参与。</p><p>费用假设：佣金万2.5、单笔最低5元；过户费成交额万0.1，双向；卖出印花税万5；买卖各按5个基点不利滑点计价，费用含入持仓成本。为统一对照假设，不等于你的券商账单。未模拟分红、送转、除权与停牌后的资产调整，相关标的需单独核对。最大回撤按权益采样计算，卖出单胜率按卖出成交统计。</p><p>这是从启动时刻起的前向模拟，非真实证券交易，也不是历史回测；后台依赖本机服务运行、电脑不休眠。手动委托会计入该账户总收益，并在记录中标识；比较策略时需注意人工干预差异。暂停自动策略时自动买单暂停成交，已有卖单及手动单继续复核；不自动撤单，可在委托列表单独撤销。</p></details><div id="paperContent"></div></section>
   <section id="simPage" class="page" hidden>
-    <div class="panel sim-top"><div><h2>我的策略实验室</h2><p>自己的公式选股 → 每日定时买入 → 分时退出与涨停保护。每套策略独立记账。</p></div><button id="simNew" class="button">＋ 新建策略</button></div>
+    <div class="panel sim-top"><div><h2>我的策略实验室</h2><p>自己的公式选股 → 每日定时买入 → 分时退出与涨停保护。自定义策略最多同时运行3套，加上“模拟交易”的主线、三维2个账户，合计5个独立账户。下方分别查看持仓、盈亏和交易。</p></div><button id="simNew" class="button">＋ 新建策略</button></div>
     <div id="simList" class="sim-list"></div><p id="simMessage" role="status" aria-live="polite"></p>
-    <div class="sim-layout"><form id="simForm" class="panel sim-editor">
+    <div class="sim-workspace"><details id="simEditor" class="panel sim-editor-wrap"><summary id="simEditorTitle">新建 / 另存策略（点击展开）</summary><form id="simForm" class="sim-editor">
       <label>策略名称<input name="name" maxlength="60" required></label>
       <label>选股方法说明<textarea name="description" rows="2" maxlength="4000"></textarea></label>
       <label>执行公式<textarea name="formula" rows="5" maxlength="4000" required spellcheck="false"></textarea></label>
@@ -88,7 +88,7 @@
       <div class="sim-warning">涨停暂不止盈并弹窗，保护线同步抬高；已观察到涨停后炸板触发卖出。次日止损不低于前日涨停价，止盈按涨停价再加设定比例，均只上移。达到止盈观察线后，量增价升且1分钟涨速&gt;1%继续持有；涨速&lt;0或低于分时均价触发退出，其余保持观察。涨速=相邻完整一分钟收盘涨跌幅，量增=本分钟量大于上一分钟。</div>
       <p class="sim-help">每套初始10万元。当前按已闭合分钟及约30秒后台检查，不是逐笔盘口；分钟内瞬间炸板回封可能漏检。T+1、涨跌停、流动性和费用均计入；退出受限时保留待卖状态。买入窗口最多2分钟，错过不补单。暂停会撤销未成交单并停止退出监控。修改后另存新策略，保留旧策略历史。</p>
       <div class="bar-actions"><button type="button" id="simValidate" class="button">校验公式</button><button class="button gold" type="submit">保存为新策略</button></div>
-    </form><div id="simResults"><div class="empty">先保存策略，再检查一轮或启动定时模拟。</div></div></div>
+    </form></details><div id="simResults" class="sim-dashboard" aria-label="三策略持仓与交易对照"></div></div>
   </section>
   <section id="notesPage" class="page" hidden>
     <div class="panel notes-overview"><div><b>全能的野人 · 聊技术</b><p id="notesProgress">正在读取笔记…</p></div><a class="button" href="https://www.douyin.com/collection/7526865577185380404/1" target="_blank" rel="noopener noreferrer">原合集 ↗</a><button class="button" id="notesReload">重新载入</button><button class="button gold" id="notesNew">＋ 写笔记</button></div>
