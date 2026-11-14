@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from terminal_entry_features import finite,predict_entry
 from terminal_backtest import replay_strategy,write_json
 from terminal_paper import clock
 from tools.compare_historical_rankings import CachedHistory,metrics,validate_ledger,ranking_key
@@ -36,7 +37,6 @@ POLICIES=[dict(id='rank_only',threshold=None,stop_max=1.,penalty=0.),
  dict(id='opportunity_edge',threshold=0.,stop_max=.35,rise_min=.5,penalty=0.,scoring='opportunity')]
 
 
-def finite(value):return value is not None and math.isfinite(float(value))
 
 
 def weighted_corr(x,y,w):
@@ -115,17 +115,6 @@ def fit_entry_model(samples,cutoff,minimum=40,profile='general'):
                 small_sample=len(rows)<100,correlations=correlations)
 
 
-def predict_entry(model,features):
-    values=[1.]
-    for item in model['features']:
-        value=features.get(item['feature'])
-        if not finite(value):return None
-        value=min(item['upper'],max(item['lower'],float(value)))
-        values.append((value-item['center'])/item['scale'])
-    v=np.array(values);net=float(np.sum(v*np.array(model['return_coefficients'])));z=float(np.sum(v*np.array(model['stop_coefficients'])))
-    rise=float(np.sum(v*np.array(model['rise_coefficients'])))
-    return dict(expected_net_pct=net,stop_probability=1/(1+math.exp(-max(-30,min(30,z)))),
-                rise5_probability=1/(1+math.exp(-max(-30,min(30,rise)))))
 
 
 def policy_accept(prediction,policy):

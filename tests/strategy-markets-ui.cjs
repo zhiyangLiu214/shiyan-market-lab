@@ -17,4 +17,12 @@ console.log('市场范围界面：默认三市场、勾选保存、历史策略�
 const scoreHtml=context.simScoreEvidence({ranking_mode:'composite',scores:[85,75,100],score_version:'daily-v1.0',score_reasons:['<突破>']});assert.match(scoreHtml,/结构 85/);assert.match(scoreHtml,/趋势 75/);assert.match(scoreHtml,/量价 100/);assert.match(scoreHtml,/&lt;突破>/);
 assert.equal(context.simScoreEvidence({ranking_mode:'formula'}),'');
 
+elements.entry_model={value:''};
+context.simFill({entry_model:'feilong-joint-v1',boards:['main'],buy_time:'14:30'});
+assert.equal(context.simConfig().entry_model,'feilong-joint-v1');
+assert.match(context.simEntryLabel('feilong-joint-v1'),/量价联合/);
+const entryHtml=context.simScoreEvidence({entry_model:'feilong-joint-v1',entry_label:'<模型>',entry_pass:false,entry_reason:'<缺失>',entry_as_of:'2026-11-14 14:30:00'});
+assert.match(entryHtml,/未通过/);assert.match(entryHtml,/未确认/);assert.match(entryHtml,/&lt;缺失>/);assert.match(entryHtml,/14:30/);
+context.simFill({});assert.equal(context.simConfig().entry_model,'');
+
 context.simFill({holding_limit:false});assert.equal(context.simConfig().holding_limit,false);context.simFill({});assert.equal(context.simConfig().holding_limit,true);

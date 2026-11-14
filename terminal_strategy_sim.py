@@ -16,6 +16,7 @@ from terminal_strategy_exit import exit_decision,PATTERNS
 from terminal_universe import BOARDS,in_boards
 from terminal_strategy_rank import strategy_rank
 from terminal_holding import holding_deadline
+from terminal_entry_filter import model_id,entry_eligible
 
 EXAMPLE='MA5:=MA(C,5);\nMA20:=MA(C,20);\n选股:C>MA20 AND MA5>MA20 AND V>MA(V,5)*1.2;'
 
@@ -27,6 +28,7 @@ def checked_config(body):
     if not 1<=len(name)<=60 or len(description)>4000:raise ValueError('请填写策略名称；说明最多4000字')
     compile_formula(formula)
     ranking_mode=body.get('ranking_mode','composite')
+    entry_model=model_id(body.get('entry_model',''))
     if ranking_mode not in ('composite','formula'):raise ValueError('排序方式无效')
     if ranking_mode=='formula':compile_formula(ranking)
     else:ranking='C/REF(C,1)-1'
@@ -46,6 +48,7 @@ def checked_config(body):
     try:datetime.strptime(buy_time,'%H:%M')
     except ValueError:raise ValueError('买入时间无效') from None
     if not ('09:31'<=buy_time<='11:27' or '13:01'<=buy_time<='14:54'):raise ValueError('买入时间须在09:31–11:27或13:01–14:54，预留检查与成交时间')
+    if entry_model and (buy_time!='14:30' or boards!=['main']):raise ValueError('当前冻结量价模型仅适用于14:30选股及沪深主板范围')
     values={}
     for key,default,low,high in [('take_profit',10,.1,200),('stop_loss',5,.1,50),('position_pct',10,1,70),('max_exposure',70,10,100),('max_positions',5,1,5)]:
         value=body.get(key,default)
@@ -56,7 +59,7 @@ def checked_config(body):
     if type(body.get('holding_limit',True)) is not bool:raise ValueError('最长持仓开关须为布尔值')
     patterns=body.get('exit_patterns',['vwap_cross'])
     if not isinstance(patterns,list) or any(p not in PATTERNS for p in patterns):raise ValueError('辅助卖出条件无效')
-    return dict(name=name,description=description,formula=formula,ranking=ranking,ranking_mode=ranking_mode,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
+    return dict(name=name,description=description,formula=formula,ranking=ranking,ranking_mode=ranking_mode,entry_model=entry_model,pool=pool,codes=codes,boards=boards,buy_time=buy_time,exit_patterns=list(dict.fromkeys(patterns)),
                 **values,holding_limit=body.get('holding_limit',True),limit_up_trail=True,initial_cash=100000,scan_trigger_seconds=120)
 
 
@@ -83,7 +86,7 @@ class StrategyStore:
         if not isinstance(sid,str) or not re.fullmatch('[a-f0-9]{32}',sid):raise ValueError('策略编号无效')
         with self.db() as db:row=db.execute('SELECT * FROM strategies WHERE id=?',(sid,)).fetchone()
         if not row or row['mode'].startswith('archived'):raise ValueError('策略不存在或已删除')
-        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['config'].pop('buy_window_seconds',None);item['config'].setdefault('scan_trigger_seconds',120);item['result']=json.loads(item['result'] or '{}');return item
+        item=dict(row);item['config']=json.loads(item['config']);item['config'].setdefault('boards',list(BOARDS));item['config'].setdefault('ranking_mode','formula');item['config'].setdefault('entry_model','');item['config'].pop('buy_window_seconds',None);item['config'].setdefault('scan_trigger_seconds',120);item['result']=json.loads(item['result'] or '{}');return item
 
     def list(self,mode):
         with self.db() as db:ids=[r[0] for r in db.execute('SELECT id FROM strategies WHERE mode=? ORDER BY created DESC,rowid DESC',(mode,))]
@@ -144,10 +147,11 @@ def exit_lines(position,quote,config,previous=None):
 
 
 class StrategyEngine:
-    def __init__(self,store,reader,pool_reader,market_scan=None,calendar=None):
+    def __init__(self,store,reader,pool_reader,market_scan=None,calendar=None,entry_reader=None):
         self.store,self.reader,self.pool_reader=store,reader,pool_reader
         self.market_scan=market_scan
         self.calendar=calendar
+        self.entry_reader=entry_reader
         self.guards={};self.check_threads={};self.thread=None;self.wakeup=threading.Event()
 
     def ensure(self):
@@ -258,8 +262,9 @@ class StrategyEngine:
             row['name']=q['daily'].get('name') or row['name'];row['source']=q['daily'].get('formula_source',q['daily'].get('source'));row['as_of']=q['as_of']
             row['adjustment']=q['daily'].get('formula_adjustment');row['bar_count']=len(bars)
             row['matched']=bool(evaluate_formula(item['config']['formula'],bars,code=meta['code'],name=row['name']))
-            if row['matched']:row.update(strategy_rank(item['config'],bars,meta['code'],row['name']))
-            row['data_ok']=True;row['reason']='公式入选' if row['matched'] else '公式不满足'
+            if row['matched']:row.update(strategy_rank(item['config'],bars,meta['code'],row['name'],self.entry_reader))
+            row['data_ok']=True;row['reason']=row.get('entry_reason') or ('公式入选' if row['matched'] else '公式不满足')
+            if row.get('entry_status')=='missing':row['data_ok']=False
         except (ValueError,TypeError,KeyError,ArithmeticError) as exc:row['reason']=str(exc)[:200]
         return row
 
@@ -302,8 +307,9 @@ class StrategyEngine:
                 for order in account['orders']:
                     if order['status']!='pending' or order['side']!='buy':continue
                     q=quotes.get(order['code']);check=self._assessment(dict(code=order['code'],name=order['name']),q,item)
-                    checks[order['id']]=bool(pool.get('ready') and order['code'] in pool_codes and check['data_ok'] and check['matched'])
+                    checks[order['id']]=bool(pool.get('ready') and order['code'] in pool_codes and check['data_ok'] and check['matched'] and entry_eligible(check))
                     if check['data_ok'] and not check['matched']:book.cancel(mode,order['id'],'成交前公式已不满足')
+                    elif check['data_ok'] and not entry_eligible(check):book.cancel(mode,order['id'],'成交前未通过量价买入门槛：'+check.get('entry_reason','数据待确认'))
                     if needs_pool and pool.get('ready') and order['code'] not in pool_codes:book.cancel(mode,order['id'],'完整股票池已移出该标的')
                 with self.store.lock:
                     if self.store.get(sid)['enabled']:book.update(mode,{c:q for c,q in quotes.items() if q},clock(),buy_checks=checks)
@@ -339,7 +345,7 @@ class StrategyEngine:
                 current = clock()
                 can_submit = current[:10] == now[:10] and current >= target and session(current)
                 if buying and can_submit and valid:
-                    ordered=sorted([r for r in assessments if r['matched']],key=lambda r:(-r['rank'],r['code']))
+                    ordered=sorted([r for r in assessments if r['matched'] and entry_eligible(r)],key=lambda r:(-r['rank'],r['code']))
                     positions={p['code']:p for p in account['positions']};reserved=set(positions)|pending
                     for row in ordered:
                         code=row['code']
@@ -354,7 +360,9 @@ class StrategyEngine:
                         try:
                             submitted_at = clock()
                             if submitted_at[:10] != now[:10] or not session(submitted_at):break
-                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,('定时买入；自定义选股公式成立；'+('综合评分 '+str(row['rank'])+' 分优先' if cfg.get('ranking_mode')=='composite' else '自定义排序值 '+str(row['rank']))),'auto',submitted_at)
+                            why=('量价门槛E='+str(round(row['rank'],6))+'，模型'+row['entry_model'] if cfg.get('entry_model') else '综合评分 '+str(row['rank'])+' 分优先' if cfg.get('ranking_mode')=='composite' else '自定义排序值 '+str(row['rank']))
+                            if cfg.get('entry_model'):plan['entry_evidence']={k:v for k,v in row.items() if k.startswith('entry_')}
+                            oid=self._submit(sid,book,mode,'main',code,row['name'],'buy',qty,q['price'],q['as_of'],plan,'定时买入；自定义选股公式成立；'+why,'auto',submitted_at)
                             submitted.append(oid);reserved.add(code);row['reason']='已提交，等待后续新分钟成交'
                         except ValueError as exc:row['reason']=str(exc)
                     self.store.daily(sid,now[:10],'done','已完成本日定时检查，不重复买入')

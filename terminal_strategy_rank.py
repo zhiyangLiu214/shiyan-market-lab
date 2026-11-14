@@ -5,7 +5,10 @@ from terminal_engine import analyze,FACTOR_VERSION
 from terminal_formula import evaluate_formula,FormulaError
 
 
-def strategy_rank(config,bars,code='',name=''):
+def strategy_rank(config,bars,code='',name='',entry_reader=None):
+    if config.get('entry_model'):
+        if entry_reader is None:raise FormulaError('买入过滤模型尚未配置，不能退回原评分')
+        return entry_reader(config,code)
     # Legacy saved strategies keep their explicit formula ordering.
     if config.get('ranking_mode','formula')=='formula':
         return dict(rank=evaluate_formula(config['ranking'],bars,code=code,name=name),ranking_mode='formula')

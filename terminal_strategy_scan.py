@@ -8,11 +8,13 @@ from terminal_formula import evaluate_formula,FormulaError
 from terminal_paper import clock
 from terminal_universe import BOARDS
 from terminal_strategy_rank import strategy_rank
+from terminal_entry_filter import entry_eligible
 
 
 class StrategyMarketScan:
-    def __init__(self,universe,reader):
+    def __init__(self,universe,reader,entry_reader=None):
         self.universe,self.reader=universe,reader;self.lock=threading.RLock();self.jobs={};self.active=None
+        self.entry_reader=entry_reader
 
     def snapshot(self,sid):
         with self.lock:
@@ -34,7 +36,7 @@ class StrategyMarketScan:
                 age = time.monotonic() - old.get('finished_mono', 0)
                 if scheduled_for and old['status'] == 'complete' and not old['failed']:
                     return self._pool(sid)
-                if age < (300 if old['status'] == 'complete' else 120):
+                if age < (300 if old['status'] == 'complete' and not old['failed'] else 60):
                     return self._pool(sid)
             if self.active is not None:return dict(ready=False,items=[],reason='正在扫描另一套市场策略，稍后重试',market_scan=self.snapshot(sid))
             job=dict(status='running',scheduled_for=scheduled_for,day=now[:10],started=now,checked=now,total=0,done=0,failed=0,excluded=0,matched=0,rows=[],source='上交所股票名录 + 深交所A股名录',reason='正在读取完整市场名录',boards=cfg['boards'])
@@ -47,7 +49,7 @@ class StrategyMarketScan:
         if not job:return dict(ready=False,items=[],reason='市场扫描尚未开始')
         ready=job['status']=='complete' and job['failed']==0 and job['day']==clock()[:10]
         # All matches remain visible; only the top 50 are requoted for execution.
-        matches=sorted([r for r in job['rows'] if r.get('matched') and r.get('data_ok')],key=lambda r:(-r['rank'],r['code']))
+        matches=sorted([r for r in job['rows'] if r.get('matched') and r.get('data_ok') and entry_eligible(r)],key=lambda r:(-r['rank'],r['code']))
         return dict(ready=ready,items=matches[:50] if ready else [],reason=job['reason'],market_scan=job)
 
     def _run(self,item,job):
@@ -64,8 +66,9 @@ class StrategyMarketScan:
                     bars=quote['bars'];row.update(source=quote.get('source'),as_of=quote.get('as_of'),adjustment=quote.get('adjustment'),bar_count=len(bars))
                     if not bars or bars[-1]['date']!=day:raise ValueError('缺少扫描当日的日线快照')
                     row['matched']=bool(evaluate_formula(cfg['formula'],bars,code=meta['code'],name=meta['name']))
-                    if row['matched']:row.update(strategy_rank(cfg,bars,meta['code'],meta['name']))
-                    row.update(data_ok=True,reason='公式入选' if row['matched'] else '公式不满足')
+                    if row['matched']:row.update(strategy_rank(cfg,bars,meta['code'],meta['name'],self.entry_reader))
+                    row.update(data_ok=True,reason=row.get('entry_reason') or ('公式入选' if row['matched'] else '公式不满足'))
+                    if row.get('entry_status')=='missing':row['data_ok']=False
                 except FormulaError as exc:
                     # Insufficient listing history is an explicit exclusion,
                     # unavailable feeds/missing fields remain data failures.
