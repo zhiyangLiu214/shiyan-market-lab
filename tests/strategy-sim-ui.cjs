@@ -8,7 +8,7 @@ const status=source.slice(source.indexOf('function renderAutoStatus('),source.in
  const nodes=new Map();let resets=0,persisted=null,updates=0;
  const state={page:'sim',generation:3,details:new Map(),selected:{},detailTokens:{watch:0,scan:0}};
  const context={state,history:{replaceState(){}},$:id=>{if(!nodes.has(id))nodes.set(id,{close(){}});return nodes.get(id);},
-   clearStockSearch(){},persist:(k,v)=>persisted=v,resetStrategySim(){resets++;},updateMode(){updates++;},renderWatch(){},renderStrategy(){},refresh:async()=>{},
+   clearStockSearch(){},persist:(k,v)=>persisted=v,resetStrategySim(){resets++;},resetTradeNotices(){},updateMode(){updates++;},renderWatch(){},renderStrategy(){},refresh:async()=>{},
    loadPaper(){},paperState:null,alertNotice:[],realtimeLoop:{reset(){},tick(){}},intervalMs:()=>30000};
  vm.createContext(context);vm.runInContext(mode+status,context);
  await context.changeMode('demo');
