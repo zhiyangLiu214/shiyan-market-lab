@@ -14,6 +14,38 @@ from terminal_paper import PaperLedger
 from terminal_strategy_sim import checked_config
 from flask import Flask
 from terminal_api import backtest_json
+from tools.compare_historical_rankings import ranking_key
+
+
+class RankingComparisonTests(unittest.TestCase):
+    def test_only_candidate_order_changes_and_scores_remain_original(self):
+        days=['2026-11-12','2026-11-13']
+        raw=[[day,10,10,10,10,100000] for day in days]
+        class Data:
+            def daily(self,code):return dict(raw=raw,qfq=raw)
+            def ticks(self,code,day):return dict(points=[dict(time='15:00',price=10,volume=100000)])
+        cfg=checked_config(dict(name='fixture',formula='C>0',pool='market',max_positions=1))
+        strategy=dict(id='fixture',config=cfg)
+        matches=[dict(strategy='fixture',date=days[-1],code=code,name='fixture',rank=rank)
+                 for code,rank in [('600001',90),('600002',10)]]
+        with patch('terminal_backtest.minute_points',side_effect=lambda ticks,bar:ticks['points']):
+            default=replay_strategy(strategy,matches,Data(),days[1:])
+            descending=replay_strategy(strategy,matches,Data(),days[1:],candidate_key=ranking_key('composite_desc','fixture'))
+            ascending=replay_strategy(strategy,matches,Data(),days[1:],candidate_key=ranking_key('composite_asc','fixture'))
+        self.assertEqual(default,descending)
+        self.assertEqual(default['trades'][0]['code'],'600001')
+        self.assertEqual(ascending['trades'][0]['code'],'600002')
+        self.assertEqual(ascending['trades'][0]['score'],10)
+        self.assertEqual(default['nav'],ascending['nav'])
+        self.assertEqual(matches[0]['rank'],90)
+
+    def test_random_order_is_reproducible_and_input_order_independent(self):
+        rows=[dict(code=f'{i:06}',date='2026-11-13',rank=50) for i in range(20)]
+        key=ranking_key('random','fixture',1)
+        ordered=sorted(rows,key=key)
+        self.assertEqual(ordered,sorted(reversed(rows),key=ranking_key('random','fixture',1)))
+        self.assertNotEqual(ordered,sorted(rows,key=ranking_key('random','fixture',2)))
+        with self.assertRaises(ValueError):ranking_key('unknown','fixture')
 
 
 class ReportTransportTests(unittest.TestCase):
