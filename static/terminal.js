@@ -237,6 +237,7 @@ realtimeLoop=new RefreshLoop({interval:intervalMs,visible:()=>!document.hidden,o
  paper:{delay:()=>10000,eligible:()=>state.page==='paper',run:loadPaper},
  sim:{delay:()=>10000,eligible:()=>true,run:loadStrategySim},
  operations:{always:true,delay:()=>10000,eligible:()=>true,run:pollTradeNotices},
+ systemPush:{always:true,delay:()=>30000,eligible:()=>window.isSecureContext,run:refreshSystemPush},
  alerts:{delay:n=>Math.max(30000,n),eligible:()=>watchItems().length>0,run:pollWatchAlerts},
  detail:{delay:n=>n,eligible:()=>state.page==='watch'&&!!state.selected.watch,run:()=>showDetail(state.selected.watch,'watch',{background:true,force:true})},
  scan:{delay:n=>Math.max(60000,n*2),eligible:()=>state.page==='scan'&&!document.activeElement?.matches('#weightsPanel input,#minBoardPct,#minCompanies'),run:()=>startScan({background:true})}
@@ -245,7 +246,7 @@ $('refreshInterval').addEventListener('change',()=>{persist('sy-auto-seconds',Nu
 document.addEventListener('visibilitychange',()=>realtimeLoop.tick());
 window.addEventListener('pagehide',()=>realtimeLoop.stop());
 window.addEventListener('pageshow',()=>realtimeLoop.start());
-initNotes();initPaper();initWatchAlerts();initStrategySim();initTradeNotices();realtimeLoop.start();if(!intervalMs())realtimeLoop.run('market',{force:true});
+initNotes();initPaper();initWatchAlerts();initStrategySim();initTradeNotices();initSystemPush();realtimeLoop.start();if(!intervalMs())realtimeLoop.run('market',{force:true});
 
 if(new URLSearchParams(location.search).get("page")==="notes")navigate("notes");
 

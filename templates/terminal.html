@@ -8,20 +8,21 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='terminal.css', v='paper-health-20261113') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='pressure.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='mainline.css') }}">
-<script defer src="{{ url_for('static', filename='realtime.js', v='operation-notices-1') }}"></script>
+<script defer src="{{ url_for('static', filename='realtime.js', v='system-push-1') }}"></script>
 <script defer src="{{ url_for('static', filename='research.js') }}"></script>
 <script defer src="{{ url_for('static', filename='pressure.js') }}"></script>
 <script defer src="{{ url_for('static', filename='mainline.js', v='authorized-20261113') }}"></script>
 <link rel="stylesheet" href="/static/notes.css">
 <script defer src="/static/notes.js"></script>
 <script defer src="/static/paper.js?v=holding-1-entry-reasons-20261113"></script>
-<link rel="stylesheet" href="/static/strategy-sim.css?v=operation-notices-1">
+<link rel="stylesheet" href="/static/strategy-sim.css?v=system-push-1">
 <script defer src="/static/strategy-sim.js?v=operation-notices-1"></script>
 <script defer src="/static/trade-notices.js?v=1"></script>
+<script defer src="/static/system-push.js?v=1"></script>
 <script defer src="/static/alerts.js"></script>
 <script defer src="/static/alerts-ui.js"></script>
 <script defer src="/static/backtest.js?v=1"></script>
-<script defer src="{{ url_for('static', filename='terminal.js', v='operation-notices-1') }}"></script>
+<script defer src="{{ url_for('static', filename='terminal.js', v='system-push-1') }}"></script>
 <script defer src="/static/sources.js?v=qfq-sources-20261113"></script>
 <link rel="stylesheet" href="/static/backtest.css?v=1">
 </head>
@@ -45,6 +46,7 @@
   <div class="bar-actions"><label for="refreshInterval">自动刷新</label><select id="refreshInterval" aria-label="自动刷新间隔"><option value="30">30 秒</option><option value="60">60 秒</option><option value="0">暂停</option></select><label for="mode">数据模式</label><select id="mode"><option value="live">行情接口</option><option value="demo">演示样本</option></select><a href="/legacy" target="_blank" rel="noopener">旧版看板 ↗</a></div>
 </div>
 <div id="demoBanner" class="demo-banner" hidden>演示模式 · 所有行情、股票名称及图表均为合成样本，用于体验功能，不代表真实市场。</div>
+<div class="system-push-bar"><span id="systemPushStatus" role="status">正在核对系统通知…</span><button id="enableSystemPush" class="button" disabled>启用系统桌面通知</button><button id="testSystemPush" class="text-button" disabled>测试系统通知（15秒后）</button></div>
 <main>
   <section class="page-heading"><div><div class="eyebrow" id="pageEyebrow">MARKET OVERVIEW</div><h1 id="pageTitle">把握市场的<span>主线脉络</span></h1><p id="pageSubtitle">先判断主线与阶段，再观察龙头、趋势龙与补涨角色。</p></div><div class="heading-actions"><span id="updated">等待行情</span><button class="button" id="refresh">↻ 刷新行情</button></div></section>
   <div class="realtime-status"><span id="autoStatus" role="status" aria-live="off">自动刷新已开启</span><span>行情与资金轮询更新；资金为交易日累计，非分钟增量</span></div>
@@ -130,5 +132,5 @@
 <dialog id="alertHistoryDialog"><div class="dialog-head"><h2>策略提醒记录 · 最近100条</h2><button class="icon-button" id="closeAlertHistory" aria-label="关闭提醒记录">×</button></div><div id="alertHistoryList"></div></dialog>
 <aside id="priceNotice" class="price-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b>策略观察条件已触发</b><button class="icon-button" id="dismissPriceNotice" aria-label="关闭价格提醒">×</button></div><div id="priceNoticeList"></div></aside>
 <div id="toast" role="status" aria-live="polite"></div>
-<aside id="simNotice" class="sim-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b id="simNoticeTitle">模拟操作提醒</b><button id="simNoticeClose" class="text-button" aria-label="已读当前提醒并查看下一组">已读并关闭</button></div><div id="simNoticeItems"></div><button id="simNoticeAllRead" class="text-button">全部标为已读</button><small>五个模拟账户共用。委托、信号与模拟成交分别提示；前台每10秒核对，关闭网页后不会发送系统推送。</small></aside>
+<aside id="simNotice" class="sim-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b id="simNoticeTitle">模拟操作提醒</b><button id="simNoticeClose" class="text-button" aria-label="已读当前提醒并查看下一组">已读并关闭</button></div><div id="simNoticeItems"></div><button id="simNoticeAllRead" class="text-button">全部标为已读</button><small>五个模拟账户共用。委托、信号与模拟成交分别提示；网页前台每10秒核对；系统桌面通知需在顶部授权启用。</small></aside>
 </body></html>

@@ -56,10 +56,7 @@ class TradeNoticeService:
     def __init__(self,paper,strategies):
         self.paper,self.strategies=paper,strategies
 
-    def page(self,mode,cursors=None,limit=100):
-        if not isinstance(cursors,dict) or len(cursors)>150:raise ValueError('提醒游标格式无效')
-        if any(not isinstance(k,str) or type(v) is not int or not 0<=v<=2**63-1 for k,v in cursors.items()):raise ValueError('提醒游标无效')
-        limit=max(1,min(100,limit));events=[];next_cursor=dict(cursors);more=False
+    def sources(self,mode):
         streams=[('paper',self.paper,'模拟交易')]
         with self.strategies.db() as db:
             rows=db.execute('SELECT id,config,mode FROM strategies WHERE mode IN (?,?)',(mode,'archived-'+mode)).fetchall()
@@ -72,6 +69,20 @@ class TradeNoticeService:
                 from terminal_paper import PaperLedger
                 book=PaperLedger(path)
             streams.append(('strategy:'+row['id'],book,'策略：'+names[row['id']]))
+        return streams,names
+
+    def latest_cursors(self,mode):
+        result={};streams,_=self.sources(mode)
+        for stream,book,_ in streams:
+            with book.db() as db:result[stream]=db.execute('SELECT COALESCE(MAX(seq),0) FROM operation_notices WHERE mode=?',(mode,)).fetchone()[0]
+        with self.strategies.db() as db:result['signals']=db.execute('SELECT COALESCE(MAX(rowid),0) FROM notices WHERE mode=?',(mode,)).fetchone()[0]
+        return result
+
+    def page(self,mode,cursors=None,limit=100):
+        if not isinstance(cursors,dict) or len(cursors)>150:raise ValueError('提醒游标格式无效')
+        if any(not isinstance(k,str) or type(v) is not int or not 0<=v<=2**63-1 for k,v in cursors.items()):raise ValueError('提醒游标无效')
+        limit=max(1,min(100,limit));events=[];next_cursor=dict(cursors);more=False
+        streams,names=self.sources(mode)
         for stream,book,label in streams:
             with book.db() as db:
                 page=[dict(r) for r in db.execute('SELECT * FROM operation_notices WHERE mode=? AND seq>? ORDER BY seq LIMIT ?',(mode,cursors.get(stream,0),limit+1))]
