@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from terminal_entry_features import entry_features
 from terminal_backtest import selection_bars, adjustment_basis, replay_strategy, minute_points, write_json
 from terminal_paper import clock, FEE_SCHEDULE
 from tools.compare_historical_rankings import CachedHistory
@@ -19,33 +20,6 @@ from tools.compare_historical_rankings import CachedHistory
 FEATURE_VERSION='candidate-patterns-v1'
 
 
-def entry_features(bars, market=None):
-    """Input must end at the decision time; no future labels enter this function."""
-    if len(bars)<35:raise ValueError('Entry history shorter than 35 bars')
-    close=np.array([b['close'] for b in bars],float);volume=np.array([b['volume'] for b in bars],float)
-    high=np.array([b['high'] for b in bars],float);low=np.array([b['low'] for b in bars],float)
-    price=close[-1];previous=close[-2];opening=float(bars[-1]['open']);width=high[-1]-low[-1]
-    f=dict(price_1430=price,change_today=(price/previous-1)*100,gap_open=(opening/previous-1)*100,
-           amplitude=(high[-1]-low[-1])/previous*100,
-           close_location=(price-low[-1])/width if width else .5,
-           upper_shadow=(high[-1]-max(opening,price))/width if width else 0.,
-           lower_shadow=(min(opening,price)-low[-1])/width if width else 0.,
-           body=(price-opening)/width if width else 0.)
-    for n in (3,5,10,20):f['change_'+str(n)]=(price/close[-n-1]-1)*100
-    for n in (5,10,20):f['ma_deviation_'+str(n)]=(price/close[-n:].mean()-1)*100
-    f['volume_ratio']=volume[-1]/volume[-6:-1].mean() if volume[-6:-1].mean()>0 else None
-    f['volume_5_over_20']=volume[-6:-1].mean()/volume[-21:-1].mean() if volume[-21:-1].mean()>0 else None
-    f['volatility_20']=float(np.std(np.diff(np.log(close[-21:-1]))))*100
-    f['ma20_slope_5']=(close[-20:].mean()/close[-25:-5].mean()-1)*100
-    for n in (20,60):
-        if len(bars)>=n+1:
-            h,l=max(high[-n-1:-1]),min(low[-n-1:-1]);f['distance_high_'+str(n)]=(price/h-1)*100
-            f['range_position_'+str(n)]=(price-l)/(h-l)*100 if h>l else 50.
-        else:f['distance_high_'+str(n)]=f['range_position_'+str(n)]=None
-    if market:
-        f.update(market_change=market.get('change_today'),market_change_5=market.get('change_5'))
-        f['relative_change_5']=f['change_5']-market['change_5'] if market.get('change_5') is not None else None
-    return {key:float(value) if value is not None and math.isfinite(value) else None for key,value in f.items()}
 
 
 def forward_labels(daily, actions, day, future_days):

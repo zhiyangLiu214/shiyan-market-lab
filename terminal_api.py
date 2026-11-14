@@ -26,6 +26,7 @@ from terminal_strategy_sim import StrategyStore,StrategyEngine,checked_config,EX
 from terminal_formula import FUNCTIONS
 from terminal_universe import StockUniverse
 from terminal_strategy_scan import StrategyMarketScan
+from terminal_entry_filter import EntryFilterService
 
 from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_history,
                              demo_minutes, intraday_analysis, normalize_weights, now_text,
@@ -447,8 +448,9 @@ def register_terminal(app, load_boards, load_board_stocks):
                                formula_bars=formula['bars'],formula_source=formula['source'],formula_adjustment=formula['adjustment'],formula_error=formula.get('error')))
     def strategy_daily(code,mode,meta):
         return strategy_formula_daily(code)
-    strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily)
-    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load)
+    entry_filters=EntryFilterService(Path(app.root_path)/'.runtime'/'strategy-entry')
+    strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily,entry_reader=entry_filters.evaluate)
+    strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load,entry_reader=entry_filters.evaluate)
 
     @bp.get('/api/terminal/strategy-sim')
     def strategy_state():

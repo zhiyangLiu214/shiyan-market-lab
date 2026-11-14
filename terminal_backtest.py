@@ -542,6 +542,8 @@ class BacktestStore:
         strategies = [copy.deepcopy(self.strategies.get(sid)) for sid in ids]
         for strategy in strategies:
             cfg=strategy['config']
+            if cfg.get('entry_model'):
+                raise ValueError('此回溯入口尚不支持冻结量价过滤模型，不能忽略过滤规则回放；请使用已提供的全年量价研究报告')
             if strategy['mode']!='live' or cfg['pool'] not in ('market','custom'):
                 raise ValueError('历史回溯支持真实模式的全市场或自定义股票池公式')
         with self.lock:
