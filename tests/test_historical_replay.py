@@ -1,4 +1,5 @@
 import copy
+import gzip
 import json
 import tempfile
 import unittest
@@ -11,6 +12,24 @@ from terminal_formula_prefilter import might_match
 from terminal_holding import holding_deadline
 from terminal_paper import PaperLedger
 from terminal_strategy_sim import checked_config
+from flask import Flask
+from terminal_api import backtest_json
+
+
+class ReportTransportTests(unittest.TestCase):
+    def test_gzip_preserves_all_history_and_respects_client_opt_out(self):
+        app=Flask('report_transport')
+        payload=dict(trades=[dict(code='000001',time='10:37',reason='完整历史成交')]*200)
+        with app.test_request_context(headers={'Accept-Encoding':'gzip'}):
+            response=backtest_json(payload)
+            self.assertEqual(response.headers['Content-Encoding'],'gzip')
+            self.assertIn('Accept-Encoding',response.vary)
+            self.assertEqual(json.loads(gzip.decompress(response.data)),dict(ok=True,data=payload))
+        with app.test_request_context(headers={'Accept-Encoding':'gzip;q=0, identity'}):
+            plain=backtest_json(payload)
+            self.assertNotIn('Content-Encoding',plain.headers)
+            self.assertEqual(plain.json,dict(ok=True,data=payload))
+            self.assertLess(len(response.data),len(plain.data)/5)
 
 
 class HistoricalExecutionTests(unittest.TestCase):

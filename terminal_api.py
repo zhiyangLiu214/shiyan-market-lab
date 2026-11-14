@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import gzip
 import os
 from pathlib import Path
 import time
@@ -34,6 +35,20 @@ from terminal_engine import normalize_bars
 
 from terminal_holding import TradingSessions
 from terminal_backtest import BacktestStore
+
+
+def backtest_json(data):
+    response = jsonify(ok=True, data=data)
+    response.vary.add('Accept-Encoding')
+    response.headers['Cache-Control'] = 'private, no-cache'
+    payload = response.get_data()
+    if len(payload) > 2048 and request.accept_encodings['gzip'] > 0:
+        compressed = gzip.compress(payload, compresslevel=5, mtime=0)
+        if len(compressed) < len(payload):
+            response.set_data(compressed)
+            response.headers['Content-Encoding'] = 'gzip'
+    return response
+
 
 def register_terminal(app, load_boards, load_board_stocks):
     bp = Blueprint('terminal', __name__)
@@ -478,7 +493,7 @@ def register_terminal(app, load_boards, load_board_stocks):
     def backtest_state():
         try:
             run_id = request.args.get('id')
-            return jsonify(ok=True, data=backtests.get(run_id) if run_id else dict(items=backtests.list()))
+            return backtest_json(backtests.get(run_id) if run_id else dict(items=backtests.list()))
         except (ValueError, FileNotFoundError):
             return jsonify(ok=False, error='回溯记录不存在'), 404
 
