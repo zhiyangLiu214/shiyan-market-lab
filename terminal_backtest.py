@@ -311,7 +311,7 @@ def scan_stock(meta, strategies, data, dates):
     return matches, errors
 
 
-def replay_strategy(strategy, matches, data, dates, progress=None):
+def replay_strategy(strategy, matches, data, dates, progress=None, candidate_key=None):
     cfg = strategy['config']
     cash, realized, cost_fees, peak, drawdown = 100000., 0., 0., 100000., 0.
     positions, trades, equity, skipped, errors, selected = {}, [], [], [], [], []
@@ -412,7 +412,7 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
         if errors:
             break
         candidates = sorted([row for row in matches if row['date'] == day and row['strategy'] == strategy['id']],
-                            key=lambda row: (-row['rank'], row['code']))
+                            key=candidate_key or (lambda row: (-row['rank'], row['code'])))
         selected.extend(candidates)
         value = sum(position['value'] for position in positions.values())
         for row in candidates:
