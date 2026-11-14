@@ -21,4 +21,8 @@ python3 -m venv .venv
 
 Tushare 可选配置参见 [数据源配置](../research/data-source-setup.md)。未配置或未通过权限验证的源不能当作已接通数据。
 
+系统桌面通知需要受信任的HTTPS、Python3.10及以上的Web Push发送组件，并配置实例的 `SHIYAN_PUBLIC_ORIGIN` 或 `.runtime/web-push/config.json` 中的 `public_origin`。Nginx仍应保护首页、订阅API和Service Worker，只有证书校验路径可按签发方要求公开。不要把VAPID私钥、浏览器订阅或发送队列放入Git。备份、更新时保留整个 `.runtime/web-push/`，丢失签名私钥会使已有浏览器订阅不可用。
+
+IP证书有效期较短，应设置定期续期及成功后的Nginx重载；上线前同时验证公网证书、原访问认证、订阅端点和后台通知测试。浏览器订阅需要用户点“允许”，推送通道接受只表示请求成功，最终横幅仍受设备网络、浏览器及系统通知设置影响。
+
 笔记发布脚本默认指向本机服务。发布到自己的站点时，设置 `SHIYAN_BASE_URL` 和 `SHIYAN_NETRC`，或在本机 `.runtime/notes-publish.json` 中配置 `base_url`、`netrc_path`。凭证放在权限为600的 netrc 文件中，不能放进 URL 或源码；脚本默认只预览，需要显式 `--publish` 才会写入。

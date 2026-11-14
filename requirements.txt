@@ -6,3 +6,4 @@ mini-racer==0.12.4
 numpy==2.0.2
 pytdx==1.72
 openpyxl==3.1.5
+pywebpush==2.5.0; python_version >= '3.10'

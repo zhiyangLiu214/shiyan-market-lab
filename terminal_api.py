@@ -28,6 +28,7 @@ from terminal_universe import StockUniverse
 from terminal_strategy_scan import StrategyMarketScan
 from terminal_entry_filter import EntryFilterService
 from terminal_operation_notices import TradeNoticeService
+from terminal_web_push import WebPushService
 
 from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_history,
                              demo_minutes, intraday_analysis, normalize_weights, now_text,
@@ -457,6 +458,31 @@ def register_terminal(app, load_boards, load_board_stocks):
     strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily,entry_reader=entry_filters.evaluate)
     strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load,entry_reader=entry_filters.evaluate)
     trade_notices=TradeNoticeService(paper_ledger,strategy_store)
+    web_push=WebPushService(Path(app.root_path)/'.runtime'/'web-push',trade_notices)
+
+    @bp.get('/service-worker.js')
+    def push_service_worker():
+        response=send_file(Path(__file__).parent/'static'/'push-worker.js',mimetype='application/javascript',max_age=0)
+        response.headers['Service-Worker-Allowed']='/'
+        response.headers['Cache-Control']='no-cache, no-store'
+        return response
+
+    @bp.get('/api/terminal/system-push')
+    def system_push_state():
+        return jsonify(ok=True,data=web_push.status(request.args.get('id')))
+
+    @bp.post('/api/terminal/system-push')
+    def system_push_action():
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict) or request.headers.get('Origin')!=web_push.origin:
+            return jsonify(ok=False,error='请在网站HTTPS页面启用系统通知'),400
+        try:
+            if body.get('action')=='subscribe':data=web_push.subscribe(body.get('subscription'))
+            elif body.get('action')=='test':data=web_push.test(body.get('id'))
+            else:raise ValueError('系统通知操作无效')
+            if not os.environ.get('TDX_NO_PAPER_WORKER'):web_push.ensure()
+            return jsonify(ok=True,data=data)
+        except (ValueError,TypeError,KeyError) as exc:return jsonify(ok=False,error=str(exc)),400
 
     @bp.get('/api/terminal/trade-notices')
     def trade_notice_state():
@@ -560,4 +586,5 @@ def register_terminal(app, load_boards, load_board_stocks):
     if not os.environ.get('TDX_NO_PAPER_WORKER') and any(paper_ledger.snapshot(m)['run'] for m in ('live','demo')):
         paper.ensure()
     if not os.environ.get('TDX_NO_PAPER_WORKER') and any(s['enabled'] for s in strategy_store.list('live')):strategy_engine.ensure()
+    if not os.environ.get('TDX_NO_PAPER_WORKER'):web_push.ensure()
     app.register_blueprint(bp)
