@@ -40,11 +40,13 @@ function backtestResultHTML(report) {
             <div class="sim-metrics">${[
                 ['期末权益',fmt(result.nav)],['收盘最大回撤',fmt(result.drawdown)+'%'],
                 ['已实现盈亏',fmt(result.realized)],['累计费用',fmt(result.fees)],
+                ...(result.income_events?.length ? [['税后红利应收',fmt(result.dividend_income)],['红利税/预留',fmt(result.dividend_tax)]] : []),
                 ['买入笔数',trades.filter(t=>t.side==='buy').length],['卖出笔数',trades.filter(t=>t.side==='sell').length]
             ].map(([label,value])=>`<div><small>${label}</small><b class="num">${value}</b></div>`).join('')}</div>
             ${paperSpark(result.equity.map(row=>({at:row.date,nav:row.nav})))}
             ${result.errors.map(row=>`<p class="down">${esc(row.date)} ${esc(row.code)} ${esc(row.reason)}</p>`).join('')}
             <details><summary>期末持仓 · ${result.positions.length}只</summary>${result.positions.map(p=>`<p>${esc(p.name)} ${esc(p.code)} · ${p.qty}股 · 市值${fmt(p.value)}</p>`).join('')||'<p>空仓</p>'}</details>
+            ${result.income_events?.length?`<details><summary>分红权益 · ${result.income_events.length}条</summary>${result.income_events.map(row=>`<p>${esc(row.date)} · ${esc(row.name)} ${esc(row.code)} · 税前${fmt(row.gross)} · 税/预留${fmt(row.tax)} · 税后${fmt(row.net)}</p><p>${esc(row.status)}</p>`).join('')}</details>`:''}
             <details><summary>交易明细 · ${trades.length}笔</summary><div class="backtest-scroll">${trades.map(t=>`<div class="backtest-trade"><b>${esc(t.date)} ${esc(t.time)} · ${t.side==='buy'?'买入':'卖出'} ${esc(t.name)}</b><p>${esc(t.code)} · ${t.qty}股 × ${fmt(t.price)} · 费用${fmt(t.fees)}${t.pnl==null?'':' · 盈亏'+fmt(t.pnl)}</p><p>${esc(t.reason)}</p></div>`).join('')}</div></details>
             <details><summary>每日14:30入选 · ${result.selections.length}条</summary><div class="backtest-scroll">${result.selections.map(row=>`<p>${esc(row.date)} · ${esc(row.name)} ${esc(row.code)} · 排名分${fmt(row.rank,1)}</p>`).join('')}</div></details>
             <details><summary>入选后未买入 · ${result.skipped.length}条</summary><div class="backtest-scroll">${result.skipped.map(row=>`<p>${esc(row.date)} ${esc(row.name)} · ${esc(row.reason)}</p>`).join('')}</div></details>

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from terminal_backtest import selection_bars, minute_points, replay_strategy, BacktestStore, sina_intraday_rows
+from terminal_backtest import selection_bars, minute_points, replay_strategy, BacktestStore, sina_intraday_rows, dividend_tax_rate
 from terminal_formula import evaluate_formula
 from terminal_formula_prefilter import might_match
 from terminal_holding import holding_deadline
@@ -45,6 +45,44 @@ class HistoricalExecutionTests(unittest.TestCase):
         self.assertLess(r['nav'],r['equity'][1]['nav'])
         self.assertEqual(r['positions'],[])
         self.assertAlmostEqual(r['nav'],100000+r['realized'],places=2)
+
+    def test_cash_dividend_is_an_asset_but_not_unverified_spendable_cash(self):
+        dates=['2026-06-08','2026-06-09','2026-06-10']
+        raw=[[d,c,c,c,c,100000] for d,c in zip(dates,[10,10,9])]
+        class Data:
+            def daily(self,code):
+                return dict(raw=raw,qfq=[[d,9,9,9,9,100000] for d in dates])
+            def actions(self,code):
+                return [dict(date=dates[2],category=1,fenhong=10,songzhuangu=0,peigu=0)]
+            def cash_dividend(self,code,day):
+                return dict(cash_per_share=1,record_date=dates[1],source='isolated verified fixture')
+            def ticks(self,code,day):
+                p=next(r[2] for r in raw if r[0]==day)
+                return dict(points=[dict(time=t,price=p,volume=100000,average=p) for t in ['09:31','09:32','15:00']])
+        cfg=checked_config(dict(name='fixture',formula='XG:C>0;',pool='market',holding_limit=False))
+        match=dict(strategy='test',date=dates[1],code='600000',name='样本',rank=90)
+        with patch('terminal_backtest.minute_points',side_effect=lambda ticks,bar:ticks['points']):
+            result=replay_strategy(dict(id='test',config=cfg),[match],Data(),dates[1:])
+        self.assertTrue(result['complete'])
+        self.assertEqual(len(result['trades']),1)
+        self.assertEqual(result['dividend_income'],720)
+        self.assertEqual(result['dividend_tax'],180)
+        self.assertAlmostEqual(result['nav'],result['equity'][-1]['cash']+8100+720,places=2)
+        self.assertLess(result['positions'][0]['lines']['stop'],9)
+        def sell_signal(position,quote,config,lines,state):
+            return dict(sell=True,reason='fixture sell',lines=lines,state={})
+        with patch('terminal_backtest.minute_points',side_effect=lambda ticks,bar:ticks['points']),patch('terminal_backtest.exit_decision',side_effect=sell_signal):
+            closed=replay_strategy(dict(id='test',config=cfg),[match],Data(),dates[1:])
+        self.assertEqual(closed['trades'][-1]['dividends'],720)
+        self.assertEqual(closed['positions'],[])
+        self.assertAlmostEqual(closed['nav'],100000+closed['realized'],places=2)
+        self.assertAlmostEqual(closed['nav'],closed['equity'][-1]['cash']+720,places=2)
+
+    def test_dividend_tax_uses_calendar_holding_period(self):
+        self.assertEqual(dividend_tax_rate('2026-01-15','2026-02-15'),.2)
+        self.assertEqual(dividend_tax_rate('2026-01-15','2026-02-16'),.1)
+        self.assertEqual(dividend_tax_rate('2025-01-15','2026-01-15'),.1)
+        self.assertEqual(dividend_tax_rate('2025-01-15','2026-01-16'),0)
 
 
 class HoldingDeadlineTests(unittest.TestCase):
@@ -111,6 +149,30 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(before[-1]['volume'],700)
         self.assertEqual(before[-1]['close'],10.5)
         self.assertEqual(before[0]['close'],10)
+
+    def test_cash_dividend_rebasing_is_affine_not_close_ratio(self):
+        daily,minutes,day=self.fixture()
+        daily['qfq']=[[r[0],*[float(x)-1 for x in r[1:5]],r[5]] for r in daily['raw']]
+        rows=selection_bars(daily,minutes,day,[])
+        self.assertEqual(rows[0]['close'],10)
+        self.assertEqual(rows[0]['high'],11)
+
+    def test_opening_auction_is_preserved_when_minute_source_starts_later(self):
+        daily,minutes,day=self.fixture()
+        daily['raw'][-1][1]=14
+        daily['qfq'][-1][1]=7
+        daily['raw'][-1][3]=14
+        daily['qfq'][-1][3]=7
+        rows=selection_bars(daily,minutes,day)
+        self.assertEqual(rows[-1]['open'],14)
+        self.assertEqual(rows[-1]['high'],14)
+
+    def test_flat_price_day_uses_verified_share_events(self):
+        daily,minutes,day=self.fixture()
+        daily['raw'][-1][1:5]=[10]*4
+        daily['qfq'][-1][1:5]=[9]*4
+        rows=selection_bars(daily,minutes,day,[])
+        self.assertEqual(rows[-1]['close'],10.5)
 
     def test_missing_or_duplicate_half_hour_is_not_filled(self):
         daily,minutes,day=self.fixture()

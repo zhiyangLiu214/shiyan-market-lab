@@ -53,7 +53,7 @@ class AdjustedQuoteTests(unittest.TestCase):
 class FormulaPriceSeparationTests(unittest.TestCase):
     def readers(self,tmp,offline=False):
         from terminal_api import register_terminal
-        now=datetime.now(TZ).replace(hour=15,minute=2,second=0,microsecond=0)
+        now=datetime(2026,11,13,15,2,tzinfo=TZ)
         dates=pd.bdate_range(end=now.date(),periods=500)
         raw=pd.DataFrame(dict(date=dates,open=18.,high=18.2,low=17.8,close=18.,volume=10000.,amount=18000000.))
         raw.loc[499,['open','high','low','close','amount']]=[9.5,10.1,9.4,10.,10000000.]

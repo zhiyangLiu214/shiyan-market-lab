@@ -129,7 +129,8 @@ class StrategyStore:
 def exit_lines(position,quote,config,previous=None):
     """Only confirmed past daily closes can lift next-day protection."""
     cost=position['average_cost'];opened=position['plan'].get('_opened_at','9999')
-    stop=cost*(1-config['stop_loss']/100);target=cost*(1+config['take_profit']/100);anchor=None
+    cash_adjustment=position.get('cash_dividend_per_share',0)
+    stop=cost*(1-config['stop_loss']/100)-cash_adjustment;target=cost*(1+config['take_profit']/100)-cash_adjustment;anchor=None
     if previous and previous.get('opened')==opened:
         stop=max(stop,previous['stop']);target=max(target,previous['target']);anchor=previous['anchor']
     rows=sorted([b for b in quote['daily'].get('bars',[]) if b['date']<quote['date']],key=lambda b:b['date'])

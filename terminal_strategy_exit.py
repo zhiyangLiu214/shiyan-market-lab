@@ -72,7 +72,8 @@ def exit_decision(position,q,cfg,lines,state=None):
     elif price<=lines['stop']:reason='跌破止损/涨停保护线，触发卖出'
     else:
         state['profit_armed']=bool(state.get('profit_armed') or price>=lines['target'])
-        patterns=pattern_reasons(points,cfg.get('exit_patterns',[])) if price>position['average_cost'] else []
+        economic_cost=position['average_cost']-position.get('cash_dividend_per_share',0)
+        patterns=pattern_reasons(points,cfg.get('exit_patterns',[])) if price>economic_cost else []
         if patterns:reason='；'.join(patterns)
         if state['profit_armed'] and not reason:
             if metrics['below_average']:reason='止盈观察后跌破分时均价线，触发卖出'
