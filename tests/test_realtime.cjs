@@ -23,5 +23,7 @@ const {RefreshLoop}=require('../static/realtime.js');
  let failures=0;const errorLoop=new RefreshLoop({now:()=>time,tasks:{quote:{delay:()=>30000,eligible:()=>true,run:()=>{failures++;throw Error('offline');}}}});
  await errorLoop.run('quote');await errorLoop.run('quote');assert.equal(failures,1); // retry waits; no request storm
  const started=new RefreshLoop({tasks:{}});started.start();assert.notEqual(started.timer,null);started.stop();assert.equal(started.timer,null);
+ let notices=0;const alertsLoop=new RefreshLoop({interval:()=>0,visible:()=>visible,tasks:{operations:{always:true,delay:()=>10000,eligible:()=>true,run:()=>notices++}}});
+ await alertsLoop.run('operations');assert.equal(notices,1);visible=false;alertsLoop.reset();await alertsLoop.run('operations');assert.equal(notices,1);visible=true;
  console.log('Refresh scheduler: cadence, pause, visibility, overlap, mode switch, and retry tests passed.');
 })().catch(e=>{console.error(e);process.exit(1);});

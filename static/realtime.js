@@ -11,7 +11,7 @@
       const task=this.tasks[name];if(!task)return;
       if(this.running.has(name))return this.running.get(name).promise;
       const delay=task.delay(this.interval());
-      if(!force&&(!this.interval()||!this.visible()||!task.eligible()||this.now()-(this.last.get(name)??-Infinity)<delay))return;
+      if(!force&&((!this.interval()&&!task.always)||!this.visible()||!task.eligible()||this.now()-(this.last.get(name)??-Infinity)<delay))return;
       const epoch=this.epoch;
       const entry={promise:null};this.running.set(name,entry);
       entry.promise=Promise.resolve().then(()=>task.run()).catch(error=>{if(task.onError)task.onError(error);}).finally(()=>{

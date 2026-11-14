@@ -8,19 +8,20 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='terminal.css', v='paper-health-20261113') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='pressure.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='mainline.css') }}">
-<script defer src="{{ url_for('static', filename='realtime.js') }}"></script>
+<script defer src="{{ url_for('static', filename='realtime.js', v='operation-notices-1') }}"></script>
 <script defer src="{{ url_for('static', filename='research.js') }}"></script>
 <script defer src="{{ url_for('static', filename='pressure.js') }}"></script>
 <script defer src="{{ url_for('static', filename='mainline.js', v='authorized-20261113') }}"></script>
 <link rel="stylesheet" href="/static/notes.css">
 <script defer src="/static/notes.js"></script>
 <script defer src="/static/paper.js?v=holding-1-entry-reasons-20261113"></script>
-<link rel="stylesheet" href="/static/strategy-sim.css?v=score-20261113">
-<script defer src="/static/strategy-sim.js?v=holding-limit-1"></script>
+<link rel="stylesheet" href="/static/strategy-sim.css?v=operation-notices-1">
+<script defer src="/static/strategy-sim.js?v=operation-notices-1"></script>
+<script defer src="/static/trade-notices.js?v=1"></script>
 <script defer src="/static/alerts.js"></script>
 <script defer src="/static/alerts-ui.js"></script>
 <script defer src="/static/backtest.js?v=1"></script>
-<script defer src="{{ url_for('static', filename='terminal.js', v='backtest-20261113') }}"></script>
+<script defer src="{{ url_for('static', filename='terminal.js', v='operation-notices-1') }}"></script>
 <script defer src="/static/sources.js?v=qfq-sources-20261113"></script>
 <link rel="stylesheet" href="/static/backtest.css?v=1">
 </head>
@@ -129,5 +130,5 @@
 <dialog id="alertHistoryDialog"><div class="dialog-head"><h2>策略提醒记录 · 最近100条</h2><button class="icon-button" id="closeAlertHistory" aria-label="关闭提醒记录">×</button></div><div id="alertHistoryList"></div></dialog>
 <aside id="priceNotice" class="price-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b>策略观察条件已触发</b><button class="icon-button" id="dismissPriceNotice" aria-label="关闭价格提醒">×</button></div><div id="priceNoticeList"></div></aside>
 <div id="toast" role="status" aria-live="polite"></div>
-<aside id="simNotice" class="sim-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b>策略模拟持仓提醒</b><button id="simNoticeClose" class="icon-button" aria-label="关闭策略提醒">×</button></div><div id="simNoticeItems"></div><small>浏览器前台显示；后台模拟继续运行，不代表真实成交。</small></aside>
+<aside id="simNotice" class="sim-notice" hidden role="status" aria-live="polite"><div class="dialog-head"><b id="simNoticeTitle">模拟操作提醒</b><button id="simNoticeClose" class="text-button" aria-label="已读当前提醒并查看下一组">已读并关闭</button></div><div id="simNoticeItems"></div><button id="simNoticeAllRead" class="text-button">全部标为已读</button><small>五个模拟账户共用。委托、信号与模拟成交分别提示；前台每10秒核对，关闭网页后不会发送系统推送。</small></aside>
 </body></html>

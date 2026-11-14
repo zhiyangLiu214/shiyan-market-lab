@@ -27,6 +27,7 @@ from terminal_formula import FUNCTIONS
 from terminal_universe import StockUniverse
 from terminal_strategy_scan import StrategyMarketScan
 from terminal_entry_filter import EntryFilterService
+from terminal_operation_notices import TradeNoticeService
 
 from terminal_engine import (DEMO_GROUPS, DEMO_SCAN_GROUPS, TZ, analyze, demo_history,
                              demo_minutes, intraday_analysis, normalize_weights, now_text,
@@ -367,6 +368,7 @@ def register_terminal(app, load_boards, load_board_stocks):
     def paper_action():
         body=request.get_json(silent=True) or {}
         mode='demo' if body.get('mode')=='demo' else 'live'
+        ledger_attempted=False
         try:
             action=body.get('action')
             if action=='start': paper_ledger.start(mode)
@@ -387,6 +389,7 @@ def register_terminal(app, load_boards, load_board_stocks):
                 quote=paper.read(code,mode,meta or position)
                 if not quote['valid']: raise ValueError('当前分钟行情不可用于模拟交易')
                 daily=quote['daily'];plan=position['plan'] if position else dict(daily['plan'],support=daily.get('support'))
+                ledger_attempted=True
                 paper_ledger.submit(mode,account,code,daily['name'],body.get('side'),body.get('qty'),quote['price'],quote['as_of'],plan,str(body.get('reason') or '手动模拟操作'),'manual')
             else: raise ValueError('未知模拟操作')
             if not os.environ.get('TDX_NO_PAPER_WORKER'):
@@ -394,6 +397,8 @@ def register_terminal(app, load_boards, load_board_stocks):
                 paper.wakeup.set()
             return jsonify(ok=True,data=paper_ledger.snapshot(mode))
         except (ValueError,TypeError,KeyError) as exc:
+            if body.get('action')=='order' and not ledger_attempted:
+                paper_ledger.submission_rejected(mode,body.get('account'),str(body.get('code','')),'',body.get('side'),body.get('qty'),None,str(exc))
             return jsonify(ok=False,error=str(exc)),400
         except Exception:
             return jsonify(ok=False,error='模拟操作未完成，账本事务已回滚，请刷新核对'),503
@@ -451,6 +456,16 @@ def register_terminal(app, load_boards, load_board_stocks):
     entry_filters=EntryFilterService(Path(app.root_path)/'.runtime'/'strategy-entry')
     strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily,entry_reader=entry_filters.evaluate)
     strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load,entry_reader=entry_filters.evaluate)
+    trade_notices=TradeNoticeService(paper_ledger,strategy_store)
+
+    @bp.get('/api/terminal/trade-notices')
+    def trade_notice_state():
+        import json
+        mode='demo' if request.args.get('mode')=='demo' else 'live'
+        try:
+            cursors=json.loads(request.args.get('cursors','{}'))
+            return jsonify(ok=True,data=trade_notices.page(mode,cursors))
+        except (ValueError,TypeError):return jsonify(ok=False,error='操作提醒游标无效，请刷新后重试'),400
 
     @bp.get('/api/terminal/strategy-sim')
     def strategy_state():

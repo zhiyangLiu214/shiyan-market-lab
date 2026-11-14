@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import sqlite3
 import threading
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from terminal_operation_notices import NOTICE_SCHEMA
 
 TZ = ZoneInfo('Asia/Shanghai')
 INITIAL = 100000.0
@@ -78,6 +80,7 @@ class PaperLedger:
 
             if 'holding_limit' not in [r[1] for r in db.execute('PRAGMA table_info(accounts)')]:
                 db.execute('ALTER TABLE accounts ADD COLUMN holding_limit INTEGER DEFAULT 1')
+            db.executescript(NOTICE_SCHEMA)
 
     @contextmanager
     def db(self):
@@ -196,6 +199,20 @@ class PaperLedger:
         return a, positions, value, list(pending)
 
     def submit(self, mode, account, code, name, side, qty, reference, observed, plan, reason, source='manual', now=None):
+        try:return self._submit_order(mode,account,code,name,side,qty,reference,observed,plan,reason,source,now)
+        except ValueError as exc:
+            self.submission_rejected(mode,account,code,name,side,qty,reference,str(exc),source,now)
+            raise
+
+    def submission_rejected(self,mode,account,code,name,side,qty,reference,message,source='manual',now=None):
+        if mode not in ('live','demo') or account not in ('main','scan') or not isinstance(code,str) or len(code)!=6 or not code.isdigit() or side not in ('buy','sell'):return
+        stamp=now or clock()
+        key=uuid.uuid4().hex if source=='manual' else hashlib.sha256(json.dumps([stamp[:10],account,code,side,qty,message,source],sort_keys=True).encode()).hexdigest()
+        with self.db() as db:
+            db.execute('INSERT OR IGNORE INTO operation_notices(event_key,mode,account,code,name,kind,at,title,text,qty,price,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                ('submission:'+key,mode,account,code,str(name)[:40],'submission_rejected',stamp,'委托提交未通过',('买入' if side=='buy' else '卖出')+'未形成有效委托，尚未成交。'+message,qty if type(qty) is int else None,reference if number(reference) else None,source))
+
+    def _submit_order(self, mode, account, code, name, side, qty, reference, observed, plan, reason, source='manual', now=None):
         now = now or clock()
         if account not in ('main', 'scan') or side not in ('buy', 'sell'):
             raise ValueError('账户或买卖方向无效')
