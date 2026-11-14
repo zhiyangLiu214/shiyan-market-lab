@@ -25,6 +25,30 @@ class SystemPushTests(unittest.TestCase):
         self.assertEqual(status['public_key'],other.status()['public_key']);self.assertNotIn('private',json.dumps(status))
         self.assertEqual((self.root/'vapid-private.pem').stat().st_mode&0o777,0o600)
 
+    def test_real_sender_uses_library_compatible_origin_without_trailing_slash(self):
+        import sys
+        from types import ModuleType
+        from unittest.mock import patch
+        module=ModuleType('pywebpush');module.webpush=Mock()
+        self.service.sender=None;self.service.origin='https://111.91.25.20'
+        with patch.dict(sys.modules,{'pywebpush':module}):self.service.send(self.subscription,{'title':'测试'})
+        call=module.webpush.call_args.kwargs
+        self.assertEqual(call['vapid_claims']['sub'],'https://111.91.25.20')
+        self.assertEqual(call['subscription_info'],self.subscription)
+        self.assertEqual(json.loads(call['data']),{'title':'测试'})
+
+    def test_installed_signer_accepts_actual_claims_without_network(self):
+        import importlib.util
+        from unittest.mock import patch
+        if not importlib.util.find_spec('pywebpush'):self.skipTest('Optional Python 3.10+ push dependency unavailable')
+        from pywebpush import webpush
+        self.service.public_key()
+        self.service.origin='https://111.91.25.20'
+        with patch('pywebpush.WebPusher.send') as send:
+            send.return_value.status_code=201
+            self.service.sender=None;self.service.send(self.subscription,{'title':'测试'})
+            send.assert_called_once()
+
     def test_subscription_baselines_existing_events_and_reconnect_preserves_cursor(self):
         sid=self.service.subscribe(self.subscription)['id'];self.notices.latest_cursors.assert_called_once_with('live')
         self.service.collect();self.service.collect()

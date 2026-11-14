@@ -119,7 +119,7 @@ class WebPushService:
     def send(self,subscription,payload):
         if self.sender:return self.sender(subscription,payload)
         from pywebpush import webpush
-        return webpush(subscription_info=subscription,data=json.dumps(payload,ensure_ascii=False),vapid_private_key=str(self.root/'vapid-private.pem'),vapid_claims={'sub':self.origin+'/'},ttl=600,timeout=8)
+        return webpush(subscription_info=subscription,data=json.dumps(payload,ensure_ascii=False),vapid_private_key=str(self.root/'vapid-private.pem'),vapid_claims={'sub':self.origin},ttl=600,timeout=8)
 
     def deliver(self,limit=10):
         with self.db() as db:
