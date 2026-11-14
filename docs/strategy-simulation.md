@@ -103,3 +103,20 @@ python tools/compare_historical_rankings.py \
 ```
 
 输出位于新的 `.runtime/ranking-comparisons/` 目录，包含配置来源、数据哈希、种子、分时段收益及各组独立成交记录。两个时段沿用同一滚动账户，不在分界日清仓。缺失持仓行情或未核验权益分派会标为不完整，不把中途收益当作全年结果。对照不修改线上策略和当前模拟账本。
+
+### 量价共性与买入规则研究
+
+研究工具按候选独立生成14:30特征、后5个交易日的走势标签及按原卖出规则得到的净收益。走势窗口不含入选日；原最长持仓仍含买入日。未来涨过5%与实际亏损止损可以同时发生，不把价格高点当作可成交收益。未成交、观察期不足、持仓数据缺失分别记录。
+
+```bash
+python tools/research_candidate_patterns.py --report .runtime/backtests/REPORT_ID --data .runtime/backtests/data --output .runtime/entry-study --workers 4
+python tools/augment_volume_features.py --study .runtime/entry-study --data .runtime/backtests/data --output .runtime/volume-study
+python tools/learn_entry_rules.py --report .runtime/backtests/REPORT_ID --data .runtime/backtests/data --study .runtime/volume-study --output .runtime/volume-learning --profile volume_price
+python tools/test_volume_cells.py --report .runtime/backtests/REPORT_ID --data .runtime/backtests/data --study .runtime/volume-study --output .runtime/volume-interactions
+```
+
+同期量比只比较过去交易日相同时点的累计量；午后及最后30分钟特征只用14:30之前已完成的数据。涨跌日成交量分布是量价指标，不解释为主力净流入。资金历史不完整时不补造资金特征。
+
+学习按时间分为60%训练、20%验证、20%复核。训练标签观察终点不得超过训练截止日；所需特征缺失的训练样本剔除，预测缺失时不买入。最多3个特征，量能核心版本使用2个量能特征和1个价格特征；阈值和模型在训练段拟合，9套预先固定门槛在验证段比较，之后不依据复核结果调参。验证至少8笔买入，零成交或少量盈利不能据此认定规则有效。
+
+组合测试仍按真实资金、持仓、T+1和原退出条件回放，不把逐股收益直接相加。所有模型及研究结果写入新的运行目录，不自动修改线上策略。由于同一历史可能已多轮使用，时间隔离复核属于探索证据，不能等同于全新样本外或未来盈利保证；还需后续前向模拟。
