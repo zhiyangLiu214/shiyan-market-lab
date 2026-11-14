@@ -1,5 +1,6 @@
 """Historical formula selection at 14:30 and close-price portfolio replay."""
 import bisect
+import calendar
 import copy
 import hashlib
 import json
@@ -23,13 +24,22 @@ from terminal_strategy_rank import strategy_rank
 from terminal_strategy_sim import exit_lines
 from terminal_universe import in_boards, StockUniverse
 
-VERSION = 'historical-1430-close-v1'
+VERSION = 'historical-1430-close-v2-affine'
+
+
+def dividend_tax_rate(opened, sold):
+    start = datetime.strptime(opened, '%Y-%m-%d').date()
+    year, month = start.year + (start.month == 12), start.month % 12 + 1
+    one_month = start.replace(year=year, month=month, day=min(start.day, calendar.monthrange(year, month)[1]))
+    one_year = start.replace(year=start.year+1, day=min(start.day, calendar.monthrange(start.year+1, start.month)[1]))
+    end = datetime.strptime(sold, '%Y-%m-%d').date()
+    return .2 if end <= one_month else (.1 if end <= one_year else 0.)
 
 
 def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix('.tmp')
+    temp = path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
     temp.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False), encoding='utf-8')
     temp.replace(path)
 
@@ -211,6 +221,31 @@ class HistoricalData:
                 pass
         raise ValueError('权益分派记录不可用，无法核验跨期复权')
 
+    def cash_dividend(self, code, day):
+        path = self.root/'dividends'/(code+'.json')
+        if path.exists():
+            cached = json.loads(path.read_text())
+        else:
+            cached = {}
+        if cached.get('retrieved_at','')[:10] < self.end:
+            url = 'https://datacenter-web.eastmoney.com/api/data/v1/get'
+            payload = self.http().get(url, params=dict(reportName='RPT_SHAREBONUS_DET', columns='ALL',
+                sortColumns='REPORT_DATE', sortTypes='-1', pageSize=500, pageNumber=1,
+                source='WEB', client='WEB', filter=f'(SECURITY_CODE="{code}")'), timeout=15).json()
+            rows = payload.get('result',{}).get('data')
+            if rows is None:
+                raise ValueError('现金分红实施数据不可用')
+            cached = dict(rows=rows, retrieved_at=clock(), source=url)
+            write_json(path,cached)
+        matches = [r for r in cached['rows'] if (r.get('EX_DIVIDEND_DATE') or '')[:10] == day]
+        if len(matches) != 1 or matches[0].get('PRETAX_BONUS_RMB') is None:
+            raise ValueError('现金分红金额或登记日未核验')
+        row = matches[0]
+        if not row.get('EQUITY_RECORD_DATE') or row.get('BONUS_IT_RATIO') or row.get('BONUS_RATIO'):
+            raise ValueError('含送转股或登记日缺失，需补充权益分派核验')
+        return dict(cash_per_share=float(row['PRETAX_BONUS_RMB'])/10,
+                    record_date=row['EQUITY_RECORD_DATE'][:10], source=cached['source'])
+
 
 def minute_points(tick_data, raw):
     ticks = [row for row in tick_data['rows'] if '09:25' <= row['time'] <= '15:00' and row['vol'] > 0]
@@ -281,6 +316,9 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
     cash, realized, cost_fees, peak, drawdown = 100000., 0., 0., 100000., 0.
     positions, trades, equity, skipped, errors, selected = {}, [], [], [], [], []
     daily_cache = {}
+    income_events = []
+    def receivable():
+        return money(sum(event['net'] for event in income_events))
     def bars_for(code):
         if code not in daily_cache:
             daily_cache[code] = daily_rows(data.daily(code)['raw'])
@@ -302,15 +340,38 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
             except Exception as exc:
                 errors.append(dict(date=day, code=code, reason=str(exc)))
                 break
-            quote = dict(date=day, prev_close=past[-1]['close'], daily={'bars': past}, sessions=sorted({bar['date'] for bar in rows if bar['date']<=day} | set(dates)))
-            position['value'] = position['qty'] * today['close']
-            # Daily corporate actions require explicit cash/share accounting.
             actions = data.actions(code) if hasattr(data,'actions') else []
-            events = [e for e in actions if position['opened'] < e['date'] <= day and e.get('category')==1
+            events = [e for e in actions if position['opened'] < e['date'] == day and e.get('category')==1
                       and any(e.get(k) for k in ('fenhong','songzhuangu','peigu'))]
-            if events:
-                errors.append(dict(date=day, code=code, reason='持有期发生复权因子变化，须补充权益分派后计算收益'))
+            try:
+                for event in events:
+                    if event.get('songzhuangu') or event.get('peigu'):
+                        raise ValueError('持有期发生送转或配股，须核验到账股数及可卖日期')
+                    distribution = data.cash_dividend(code,day)
+                    if position['opened'] > distribution['record_date']:
+                        raise ValueError('股权登记日与持仓日期不一致')
+                    per_share = distribution['cash_per_share']
+                    gross = money(position['qty']*per_share)
+                    tax = money(gross*.2)
+                    income_events.append(dict(date=day,code=code,name=position['name'],opened=position['opened'],
+                        qty=position['qty'],gross=gross,tax=tax,net=money(gross-tax),tax_rate=.2,
+                        status='应收红利，发放日未核验，不计可用现金',source=distribution['source']))
+                    position['cash_dividend_per_share'] = position.get('cash_dividend_per_share',0)+per_share
+                    if position.get('lines'):
+                        for key in ('stop','target'):
+                            position['lines'][key] = money(position['lines'][key]-per_share)
+                if actions:
+                    daily = data.daily(code)
+                    scale, offset = adjustment_basis(daily,day,actions)
+                    past = [dict(row,**{k:(row[k]-offset)/scale for k in ('open','close','high','low')})
+                            for row in daily_rows(daily['qfq']) if row['date']<day]
+            except Exception as exc:
+                errors.append(dict(date=day,code=code,reason=str(exc)))
                 break
+            quote = dict(date=day, prev_close=money(past[-1]['close']), daily={'bars':past},
+                         sessions=sorted({bar['date'] for bar in rows if bar['date']<=day} | set(dates)))
+            position['value'] = position['qty'] * today['close']
+            position['lines'] = exit_lines(position,quote,cfg,position.get('lines'))
             pending = position.get('pending_exit')
             for i, point in enumerate(points):
                 quote.update(price=point['price'], as_of=day+' '+point['time'], points=points[:i+1])
@@ -321,16 +382,24 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
                         price = max(lower, money(point['price']*.9995))
                         gross = money(price*position['qty'])
                         fee = money(sum(fees(gross,'sell').values()))
-                        pnl = money(gross-fee-position['cost'])
+                        related = [e for e in income_events if e['code']==code and e['opened']==position['opened']]
+                        for event in related:
+                            event['tax_rate'] = dividend_tax_rate(position['opened'],day)
+                            event['tax'] = money(event['gross']*event['tax_rate'])
+                            event['net'] = money(event['gross']-event['tax'])
+                            event['sold'] = day
+                        dividends = money(sum(e['net'] for e in related))
+                        pnl = money(gross-fee-position['cost']+dividends)
                         cash = money(cash+gross-fee)
                         realized = money(realized+pnl)
                         cost_fees += fee
                         trades.append(dict(date=day, time=point['time'], code=code, name=position['name'],
-                                           side='sell', qty=position['qty'], price=price, fees=fee, pnl=pnl, reason=pending))
+                                           side='sell', qty=position['qty'], price=price, fees=fee, pnl=pnl,
+                                           dividends=dividends,reason=pending))
                         sold.add(code)
                         del positions[code]
                         break
-                lines = exit_lines(position, quote, cfg, position.get('lines'))
+                lines = position['lines']
                 decision = exit_decision(position, quote, cfg, lines, position.get('exit_state'))
                 position['lines'], position['exit_state'] = decision['lines'], decision['state']
                 deadline = holding_deadline(position, quote, cfg.get('holding_limit', True))
@@ -362,10 +431,20 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
             today = next(bar for bar in raw if bar['date']==day)
             prior = [bar for bar in raw if bar['date'] < day]
             price = today['close']
-            if not prior or price >= money(prior[-1]['close']*(1.2 if code.startswith(('30','688')) else 1.1)):
+            previous_close = prior[-1]['close'] if prior else None
+            if prior and hasattr(data,'actions'):
+                try:
+                    daily = data.daily(code)
+                    scale, offset = adjustment_basis(daily,day,data.actions(code))
+                    adj_prior = next(r for r in daily['qfq'] if r[0]==prior[-1]['date'])
+                    previous_close = money((float(adj_prior[2])-offset)/scale)
+                except Exception as exc:
+                    errors.append(dict(date=day,code=code,reason='除权参考价核验失败 '+str(exc)))
+                    break
+            if not prior or price >= money(previous_close*(1.2 if code.startswith(('30','688')) else 1.1)):
                 skipped.append(dict(row, reason='收盘触及涨停，无法确认排队成交'))
                 continue
-            nav = cash+value
+            nav = cash+value+receivable()
             budget = min(nav*cfg['position_pct']/100, nav*cfg['max_exposure']/100-value, cash)
             minimum, step = lot(code)
             qty = math.floor(budget/price/step)*step
@@ -396,19 +475,22 @@ def replay_strategy(strategy, matches, data, dates, progress=None):
                                price=price,fees=fee,pnl=None,score=row['rank'],reason='14:30公式入选，按当日收盘价模拟买入'))
         if errors:
             break
-        nav = money(cash+sum(position['value'] for position in positions.values()))
+        nav = money(cash+sum(position['value'] for position in positions.values())+receivable())
         peak = max(peak, nav)
         drawdown = max(drawdown,(peak-nav)/peak*100)
-        equity.append(dict(date=day,nav=nav,return_pct=(nav/100000-1)*100,cash=cash,positions=len(positions)))
+        equity.append(dict(date=day,nav=nav,return_pct=(nav/100000-1)*100,cash=cash,
+                           receivable=receivable(),positions=len(positions)))
         if progress:
             progress(day)
     final = equity[-1] if equity else dict(nav=100000,return_pct=0)
+    trades.sort(key=lambda row:(row['date'],row['time']))
     sells = [row for row in trades if row['side']=='sell']
     return dict(id=strategy['id'],name=cfg['name'],config=cfg,complete=not errors,
                 return_pct=final['return_pct'] if not errors else None,nav=final['nav'] if not errors else None,
                 realized=realized,fees=money(cost_fees),drawdown=drawdown,
                 win_rate=sum(row['pnl']>0 for row in sells)/len(sells)*100 if sells else None,
-                trades=trades,equity=equity,positions=list(positions.values()),
+                trades=trades,equity=equity,positions=list(positions.values()),income_events=income_events,
+                dividend_income=receivable(),dividend_tax=money(sum(e['tax'] for e in income_events)),
                 selections=selected,skipped=skipped,errors=errors)
 
 
@@ -512,7 +594,7 @@ class BacktestStore:
                 '分时均价由历史分笔成交量加权计算，分笔量与日线量核验，分钟内回封仍有粒度误差',
                 '佣金双向万1、每笔最低1元；过户费双向万0.1，卖出印花税万5；收益含期末市值，回撤按日收盘权益计算',
                 '5交易日开关沿用各套设置，买入日算第1日，第5日14:54起退出，连续封板延持',
-                '持有期权益分派需补充股数与现金处理，遇到因子变化会停止该套收益计算']
+                '现金分红核验登记日与金额，税后红利列为应收，到账日未核验时不计可用现金；按20%预留红利税，卖出时按持有期结算；送转股和配股需另行核验']
             matches=[]
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures=[executor.submit(scan_stock,row,strategies,data,dates) for row in roster]
