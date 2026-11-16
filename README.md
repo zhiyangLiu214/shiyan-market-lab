@@ -91,4 +91,18 @@ tests/                        Python及JavaScript测试
 
 运行时会创建 `.runtime/`。模拟账户、个人笔记、数据源配置和日志均属于部署实例，不纳入 Git。更新代码必须保留已有运行目录；当前采用单进程、多线程部署。
 
+### 协作开发时查看已有策略
+
+SQLite不提供数据库登录用户；网站登录目前由反向代理负责，策略没有按登录用户隔离。协作者克隆仓库后看不到现有策略，是因为私有运行数据没有随代码分发。可以私下传递仅包含策略配置和依赖买入模型的数据包：
+
+```bash
+# 在已有策略的环境中导出；不包含账户、持仓、成交或凭证
+python tools/strategy_transfer.py export --runtime .runtime --output .runtime/private.strategy-bundle.json
+# 在协作者自己的开发环境中先预览，再导入
+python tools/strategy_transfer.py import --runtime .runtime --bundle .runtime/private.strategy-bundle.json
+python tools/strategy_transfer.py import --runtime .runtime --bundle .runtime/private.strategy-bundle.json --apply
+```
+
+建议在本机开发服务停止时导入。新策略使用新编号、默认暂停，不带历史运行状态；相同配置重复导入会跳过，同名不同配置或不同模型会拒绝覆盖。模型校验失败不会静默取消量价过滤。导入后打开网站的“策略模拟”查看，并选择与源策略相同的数据模式。这是独立副本，不自动同步回服务器；导出包与模型均不提交公开仓库。
+
 凭证仅放在服务环境变量或权限为600的本机文件中。不要把 Token、Cookie、netrc、HAR、数据库、视频素材或生产部署资料提交到公开仓库。
