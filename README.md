@@ -44,6 +44,7 @@ Tushare 已提供可选适配，需要自行配置 Token 并验证相应权限�
 - [数据源配置](research/data-source-setup.md)
 - [部署与更新](docs/DEPLOYMENT.md)
 - [开发约定](docs/development.md)
+- [连板分类研究与冻结验证](research/limit-entry-validation.md)
 
 ## 测试
 
