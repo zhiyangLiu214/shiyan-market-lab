@@ -1,0 +1,26 @@
+services:
+  shared-mysql:
+    image: mysql:8.4
+    container_name: shiyan-research-mysql
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - /app/.runtime/shared-mysql/data:/var/lib/mysql
+      - /app/.runtime/shared-mysql/secrets/root-password:/run/secrets/mysql-root:ro
+    environment:
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql-root
+    command:
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=30
+      - --max-allowed-packet=64M
+      - --local-infile=0
+      - --skip-log-bin
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

@@ -46,6 +46,7 @@ python app.py
 Tushare 已提供可选适配，需要自行配置 Token 并验证相应权限。盘中日线、完整分钟线和盘后资金历史分别核验；未配置时不参与切换。QMT／迅投目前提供客户端连通性检查工具，尚需账号、客户端及数据权限才能进一步接入。
 
 - [数据源配置](research/data-source-setup.md)
+- [共享回测研究库](docs/shared-research.md)
 - [部署与更新](docs/DEPLOYMENT.md)
 - [开发约定](docs/development.md)
 - [开发任务与验证进度](TASKS.md)

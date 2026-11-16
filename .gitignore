@@ -30,6 +30,7 @@ htmlcov/
 !/docs/development.md
 !/docs/DEPLOYMENT.md
 !/docs/strategy-simulation.md
+!/docs/shared-research.md
 /research/*
 !/research/data-source-setup.md
 !/research/limit-entry-validation.md
