@@ -30,7 +30,7 @@ class MarketRouter:
         errors=[]
         for source in order:
             if self.until.get(source,0)>time.monotonic():
-                errors.append({'em':'东方财富','dxx':'短线侠','ths':'同花顺'}[source]+'：暂不可用，冷却中');continue
+                errors.append({'em':'AKShare · 东方财富','dxx':'短线侠','ths':'同花顺'}[source]+'：暂不可用，冷却中');continue
             try:
                 data=self.primary.build() if source=='em' else self.dxx() if source=='dxx' else self.ths()
                 data.update(funds_provider=source, source_fallback=bool(errors), source_errors=errors)
@@ -38,7 +38,7 @@ class MarketRouter:
                 return data
             except Exception as exc:
                 reason=str(exc)[:160] if source=='em' and str(exc).startswith('行业资金不可用') else failure(exc)
-                errors.append({'em':'东方财富','dxx':'短线侠','ths':'同花顺'}[source]+'：'+reason)
+                errors.append({'em':'AKShare · 东方财富','dxx':'短线侠','ths':'同花顺'}[source]+'：'+reason)
                 self.until[source]=time.monotonic()+120
                 with self.quotes.lock:self.quotes.states[('funds',source)]=dict(status='unavailable',at=now_text(),code='',reason=reason)
         raise ValueError('行业资金不可用：'+'；'.join(errors))

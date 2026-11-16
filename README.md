@@ -41,6 +41,8 @@ python app.py
 
 在“行情来源与自动备用切换”中选择“AKShare优先（免费 · 东方财富）”并保存，可更新已有实例的优先级；已有合法手动设置会保留，不因代码更新被覆盖。资金优先级独立，资金数据另行校验日期、口径及覆盖。普通价格接口不等于已取得主力资金，也不会补齐缺失的历史分钟数据。
 
+板块及个股资金的首选适配也实际调用AKShare：行业资金排名、行业/个股资金历史、成分股资金与行情、涨停池均通过AKShare取得。底层东方财富来源继续标明；近3/5日金额由已核验日期的历史累计，不以抓取时间代替行情时间。隔离采集最多并发2个进程，每次总时限40秒；失败时退避并保留明确的缺失/旧快照状态。短线侠等备用仍按原有独立分类展示，不替代主线确认条件。
+
 Tushare 已提供可选适配，需要自行配置 Token 并验证相应权限。盘中日线、完整分钟线和盘后资金历史分别核验；未配置时不参与切换。QMT／迅投目前提供客户端连通性检查工具，尚需账号、客户端及数据权限才能进一步接入。
 
 - [数据源配置](research/data-source-setup.md)
@@ -74,6 +76,8 @@ terminal_engine.py             日线因子、压力位与分钟信号
 terminal_mainline.py            板块资格、评分及角色筛选
 terminal_quotes.py             行情来源与切换
 terminal_funds.py              盘中及多日资金校验
+terminal_akshare_funds.py      AKShare资金适配、日期与分页核验
+terminal_akshare_worker.py     隔离AKShare采集及源时间元数据
 terminal_tushare.py            可选授权数据源
 terminal_paper*.py             模拟账本与执行引擎
 terminal_notes.py              笔记存储

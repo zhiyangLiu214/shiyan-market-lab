@@ -157,6 +157,8 @@ class MainlineService:
         self.funds = funds
 
     def members(self, code):
+        if hasattr(self.funds, 'members'):
+            return self.funds.members(code)
         def load():
             def page(pn):
                 d = self.funds._json('https://push2.eastmoney.com/api/qt/clist/get',
@@ -198,6 +200,8 @@ class MainlineService:
         return [dict(s, funds=dict(s['funds'])) for s in result['items']]
 
     def limit_pool(self, date):
+        if hasattr(self.funds, 'limit_pool'):
+            return self.funds.limit_pool(date)
         def load():
             d = self.funds._json('https://push2ex.eastmoney.com/getTopicZTPool',
                                 dict(ut='7eea3edcaed734bea9cbfc24409ed989', dpt='wz.ztzt',
@@ -235,12 +239,13 @@ class MainlineService:
         rows = [merge_history(r, self._histories.get(r['sector_code'], {})) for r in rows]
         scales = [r['net'] for r in rows if r.get('net') is not None and r['net'] > 0 and r['date'] == date]
         for r in rows:
-            group = dict(r, funds=dict(r, source='东方财富行业资金'), member_count=1,
+            group = dict(r, funds=dict(r), member_count=1,
                          limit_count=None, max_streak=None)
             widths = [r.get(k) for k in ('rise_count', 'fall_count', 'flat_count')]
             total = sum(widths) if all(v is not None for v in widths) else 0
             group['breadth'] = r['rise_count']/total*100 if total and r.get('rise_count') is not None else None
-            if total >= MIN_MEMBERS and r['date'] == date and score_sector(group, scales):
+            known_members = sum(v for v in widths if v is not None)
+            if known_members >= MIN_MEMBERS and r['date'] == date and score_sector(group, scales):
                 universe.append(group)
         universe.sort(key=lambda g: (-g['strength'], g['sector_code']))
         # Reserve slots for multi-day accumulation, including a negative current day.
@@ -250,7 +255,7 @@ class MainlineService:
         errors = []
         if not shortlist:
             return dict(groups=[], errors=['当前无正涨幅且主力净流入及净占比均为正的行业'], date=date,
-                        updated_at=now_text(), demo=False, source='东方财富行业、成分股与资金流',
+                        updated_at=now_text(), demo=False, source=getattr(self.funds, 'source_label', '东方财富行业、成分股与资金流'),
                         scope='资金门槛未通过，不自动退回纯涨幅排名', version=VERSION, weights=WEIGHTS)
         pool = self.limit_pool(date)
         def enrich(group):
@@ -262,6 +267,8 @@ class MainlineService:
             group.update(member_count=len(stocks), limit_count=len(hits) if hits is not None else None,
                          max_streak=max((v['streak'] for v in hits), default=0) if hits is not None else None,
                          _stocks=stocks, _codes=codes)
+            if stocks and all(s.get('quote_date') == date and s.get('pct') is not None for s in stocks):
+                group['breadth'] = sum(s['pct'] > 0 for s in stocks)/len(stocks)*100
             group['funds'] = merge_history(group['funds'], self.funds.sector_history(group['sector_code']))
             score_sector(group, scales)
             return group
@@ -307,7 +314,7 @@ class MainlineService:
         if pool['status'] != 'ok':
             errors.append('涨停池不可用：涨停数量和最高连板未知，不生成涨停龙头')
         return dict(groups=chosen, errors=errors, date=date, updated_at=now_text(), demo=False,
-                    source='东方财富行业、成分股与资金流', version=VERSION, weights=WEIGHTS,
+                    source=getattr(self.funds, 'source_label', '东方财富行业、成分股与资金流'), version=VERSION, weights=WEIGHTS,
                     scope=f'同日行业至少10只成分；当日正向资金或近3/5日累计流入进入观察预筛。每轮核验前8个资金候选及轮转16个行业的多日资金；完整成分最多8个，最多展示3个低重叠板块。主线可缺位。历史资金本轮及缓存已核验 {sum(bool(g.get("history")) for g in rows)}/{len(rows)} 个行业；未核验者不推定累积。当前候选 {len(universe)} 个。')
 
 
