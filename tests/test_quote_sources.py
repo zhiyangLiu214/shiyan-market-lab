@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,10 +11,41 @@ from terminal_engine import demo_history,demo_minutes,TZ
 from terminal_source_market import MarketRouter,parse_dxx
 
 class QuoteSourceTests(unittest.TestCase):
+    def test_default_uses_akshare_first_with_actual_upstream_label(self):
+        r=QuoteRouter()
+        self.assertEqual(r.preferred,'em')
+        with patch('terminal_quotes.ak.stock_zh_a_hist',return_value=demo_history('000001')) as hist, patch.object(r,'_tencent') as backup:
+            data=r.fetch('daily_qfq','600001')
+        self.assertEqual(hist.call_args.kwargs['adjust'],'qfq')
+        self.assertEqual(hist.call_args.kwargs['symbol'],'600001')
+        self.assertEqual(data.attrs['provider'],'em')
+        self.assertIn('AKShare · 东方财富',data.attrs['source'])
+        self.assertFalse(data.attrs['source_fallback'])
+        backup.assert_not_called()
+
+    def test_missing_or_invalid_preference_defaults_to_akshare(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'sources.json'
+            self.assertEqual(QuoteRouter(path).preferred,'em')
+            for payload in ({'funds_preferred':'ths'},{'preferred':'unknown','funds_preferred':'ths'}):
+                path.write_text(json.dumps(payload))
+                r=QuoteRouter(path)
+                self.assertEqual(r.preferred,'em');self.assertEqual(r.funds_preferred,'ths')
+            r.configure('em','ths')
+            saved=QuoteRouter(path)
+            self.assertEqual(saved.preferred,'em');self.assertEqual(saved.funds_preferred,'ths')
+
+    def test_minute_adapter_calls_akshare_one_minute_interface(self):
+        r=QuoteRouter();frame=pd.DataFrame()
+        with patch('terminal_quotes.ak.stock_zh_a_hist_min_em',return_value=frame) as minute:
+            self.assertIs(r._em('minute','600001'),frame)
+        minute.assert_called_once_with(symbol='600001',period='1',adjust='')
+
     def test_primary_failure_falls_back_and_circuit_avoids_repeated_timeout(self):
         r=QuoteRouter();r._em=Mock(side_effect=requests.ReadTimeout());r._tencent=Mock(side_effect=lambda *x:demo_history('000001'));r._tdx=Mock()
         first=r.fetch('daily','600001');second=r.fetch('daily','600002')
         self.assertEqual(first.attrs['provider'],'tencent');self.assertTrue(first.attrs['source_fallback'])
+        self.assertEqual(first.attrs['source'],'腾讯行情日线 · 不复权')
         self.assertIn('超时',first.attrs['source_errors'][0]);r._em.assert_called_once();r._tdx.assert_not_called()
         self.assertEqual(second.attrs['provider'],'tencent')
 
