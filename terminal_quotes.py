@@ -12,7 +12,9 @@ import requests
 from terminal_engine import TZ, normalize_bars, intraday_analysis, validate_code, now_text
 from terminal_tushare import TushareData, TushareError
 
-LABELS = {'em':'东方财富', 'tencent':'腾讯行情', 'tushare':'Tushare', 'tdx':'通达信普通行情'}
+# Keep the persisted provider ID: AKShare wraps this existing Eastmoney adapter.
+DEFAULT_PREFERRED = 'em'
+LABELS = {'em':'AKShare · 东方财富', 'tencent':'腾讯行情', 'tushare':'Tushare', 'tdx':'通达信普通行情'}
 
 
 def symbol(code):
@@ -34,10 +36,10 @@ class QuoteRouter:
     def __init__(self, config_path=None):
         self.path=Path(config_path) if config_path else None
         self.tushare=TushareData(self.path.parent/'tushare-token' if self.path else None)
-        self.lock=threading.RLock();self.states={};self.until={};self.preferred='auto';self.revision=0;self.funds_preferred='auto'
+        self.lock=threading.RLock();self.states={};self.until={};self.preferred=DEFAULT_PREFERRED;self.revision=0;self.funds_preferred='auto'
         if self.path:
             try:
-                p=json.loads(self.path.read_text());self.funds_preferred=p.get('funds_preferred','auto') if p.get('funds_preferred','auto') in ('auto','em','dxx','ths') else 'auto';self.preferred=p['preferred'] if p['preferred'] in ('auto',*LABELS) else 'auto'
+                p=json.loads(self.path.read_text());self.funds_preferred=p.get('funds_preferred','auto') if p.get('funds_preferred','auto') in ('auto','em','dxx','ths') else 'auto';self.preferred=p.get('preferred',DEFAULT_PREFERRED) if p.get('preferred',DEFAULT_PREFERRED) in ('auto',*LABELS) else DEFAULT_PREFERRED
             except (OSError,ValueError,KeyError):pass
 
     def configure(self, preferred, funds_preferred='auto'):
