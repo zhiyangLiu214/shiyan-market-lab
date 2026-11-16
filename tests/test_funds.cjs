@@ -19,4 +19,8 @@ assert.match(vm.runInContext('fundsEvidence(stock)', context), /日期未对齐/
 stock.funds.status = 'stale';
 assert.match(vm.runInContext('fundsEvidence(stock)', context), /不作为当前信号依据/);
 assert.doesNotMatch(vm.runInContext('fundsEvidence(stock)', context), /持续净流入/);
+stock.funds.status = 'unverified';
+stock.funds.reason = '仅有AKShare日期级资金历史，盘中资金源时间未核验';
+assert.match(vm.runInContext('fundsSummary(stock.funds)', context), /仅日期级历史，盘中未确认/);
+assert.match(vm.runInContext('fundsPanel(stock)', context), /仅有AKShare日期级资金历史/);
 console.log('Fund display: units, signs, single-day/streak, mismatched date and stale evidence passed.');

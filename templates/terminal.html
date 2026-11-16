@@ -52,10 +52,10 @@
   <div class="realtime-status"><span id="autoStatus" role="status" aria-live="off">自动刷新已开启</span><span>行情与资金轮询更新；资金为交易日累计，非分钟增量</span></div>
   <details id="sourceControls" class="panel" style="padding:12px 18px;margin-bottom:16px">
     <summary>行情来源与自动备用切换</summary>
-    <p class="muted">价格与K线默认首选免费AKShare接口，当前底层来源为东方财富；实际来源与备用切换结果随行情显示。AKShare不需要Token，板块资金仍按独立的资金优先级校验与切换。</p>
+    <p class="muted">价格与K线默认首选免费AKShare接口，当前底层来源为东方财富；实际来源与备用切换结果随行情显示。AKShare不需要Token，板块与个股资金也通过AKShare获取，按独立的资金优先级校验与切换。</p>
     <div class="bar-actions" style="margin-top:12px;flex-wrap:wrap">
       <label>价格 / K线优先 <select id="quoteSource"><option value="auto">自动：AKShare（东方财富） → 腾讯 → 已配置扩展源 → 通达信</option><option value="em">AKShare优先（免费 · 东方财富）</option><option value="tencent">腾讯优先</option><option value="tushare" disabled>Tushare优先（需配置权限）</option><option value="tdx">通达信普通行情优先</option></select></label>
-      <label>板块资金优先 <select id="fundSource"><option value="auto">自动：东方财富 → 短线侠 → 同花顺</option><option value="em">东方财富优先</option><option value="dxx">短线侠资金观察优先</option><option value="ths">同花顺资金观察优先</option></select></label>
+      <label>板块资金优先 <select id="fundSource"><option value="auto">自动：AKShare（东方财富） → 短线侠 → 同花顺</option><option value="em">AKShare资金优先（免费 · 东方财富）</option><option value="dxx">短线侠资金观察优先</option><option value="ths">同花顺资金观察优先</option></select></label>
       <button class="button" id="saveSources">保存优先级</button>
     </div>
     <p class="muted">首选不可用时自动尝试其他来源；来源切换失败冷却120秒，东方财富资金通道另按30至300秒逐步退避，期满后下次请求自动复检。设置保存在服务器，两个模拟账户共用。资金分类及口径不混用；未核验日期或主力口径的备用资金只供观察。通达信普通行情不代表已取得App中的主力净额。短线侠当日板块主力净额已接通；多日及个股资金仍待接入。</p>

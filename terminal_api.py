@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 import akshare as ak
 import requests
 from flask import Blueprint, jsonify, render_template, request, send_file
-from terminal_funds import FundFlowService, demo_funds, missing
+from terminal_funds import demo_funds, missing
+from terminal_akshare_funds import AKShareFundFlowService as FundFlowService
 from terminal_paper import PaperLedger, clock as paper_clock
 from terminal_paper_runner import PaperRunner
 from terminal_market_cache import MarketCache
@@ -59,7 +60,7 @@ def register_terminal(app, load_boards, load_board_stocks):
     history_cache, markets, jobs, minute_cache = {}, {}, {}, {}
     name_cache = {}
     quotes=QuoteRouter(None if os.environ.get('TDX_NO_PAPER_WORKER') else Path(app.root_path)/'.runtime'/'market-sources.json')
-    funds = FundFlowService(None if os.environ.get('TDX_NO_PAPER_WORKER') else Path(app.root_path)/'.runtime'/'fund-source-health.json',quotes.tushare)
+    funds = FundFlowService(None if os.environ.get('TDX_NO_PAPER_WORKER') else Path(app.root_path)/'.runtime'/'akshare-fund-health.json',quotes.tushare)
     stock_search = StockSearch()
     mainline = MainlineService(funds)
     fund_router=MarketRouter(mainline,quotes)
@@ -247,7 +248,7 @@ def register_terminal(app, load_boards, load_board_stocks):
 
     @bp.get('/api/terminal/sources')
     def source_status():
-        return jsonify(ok=True,data=dict(quotes.snapshot(), stock_funds_health=funds.health()))
+        return jsonify(ok=True,data=dict(quotes.snapshot(), funds_adapter='akshare', stock_funds_health=funds.health()))
 
     @bp.post('/api/terminal/sources')
     def source_config():
