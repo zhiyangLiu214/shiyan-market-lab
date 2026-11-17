@@ -1,10 +1,12 @@
 # 共享回测研究库
 
-云端 Docker MySQL 仅绑定 `127.0.0.1:3306`，数据目录映射到 `/app/.runtime/shared-mysql/data`。协作者使用专用 SSH 公钥隧道访问，不开放数据库公网端口。研究库与网站的 SQLite 策略、模拟账户及运行目录分离。
+云端 Docker MySQL 映射宿主机 TCP `4235` 到容器 `3306`，数据目录映射到 `/app/.runtime/shared-mysql/data`，容器重启保留原有数据。研究库与网站的 SQLite 策略、模拟账户及运行目录分离。服务器仍保留专用 SSH 隧道账号；需要直连的协作者也可使用管理员私下提供的 MySQL 账号。远程 `root@'%'` 拥有全部数据库权限，密码只在服务器和授权协作者的私有文件中保存，不写入仓库。服务器本机和容器端口已验证；公网直连还需云安全组放行入站 TCP `4235`，在此之前请使用 SSH 隧道。
 
-容器定义在 [Compose 配置](../deploy/shared-mysql.compose.yaml)。`/app/.runtime/shared-mysql/secrets/root-password` 是权限为 `0600` 的服务器私有文件，不随代码部署。更新镜像前需备份映射目录并核验恢复流程；代码部署不删除或覆盖数据目录。
+容器定义在 [Compose 配置](../deploy/shared-mysql.compose.yaml)。`/app/.runtime/shared-mysql/secrets/root-password` 和 `remote-root-password` 是权限为 `0600` 的服务器私有文件，分别供容器本机 root 和远程 root 使用，不随代码部署。更新镜像前需备份映射目录并核验恢复流程；代码部署不删除或覆盖数据目录。
 
 只有已封存且在 `list` 中可见的数据集才能用于双方回测。开始共享回测前，管理员需核验文件数、清单哈希和覆盖日期。
+
+当前冻结数据集 `replay-2026-11-17-v1` 的编号为 `97ab939d-81fd-42a8-b221-c27b30143fcf`，包含 38,926 份 JSON，清单 SHA-256 为 `c401b1dff5746cd9d6ee8c828f5e49c5a458f7c0caa70f9e98f8dd9dea6c9fa5`。上传归档的 SHA-256 为 `04ba8eedb5c6aad83beed1b15e36b7d02c8ded949a0d04c1c724eed36c16eec9`；归档保存在服务器私有暂存目录。封存后已逐份核对数据库内容哈希。它是制作归档时的快照，不随本地缓存后续新增文件自动变化。
 
 ## 数据边界
 
@@ -15,13 +17,13 @@
 
 ## 协作者本地使用
 
-先安装当前仓库依赖以及 `python -m pip install PyMySQL`。从管理员私下取得数据库账号、密码和数据集编号，不要加入 Git。使用提供的 SSH 公钥对应的私钥建立隧道：
+先安装当前仓库依赖以及 `python -m pip install PyMySQL`。从管理员私下取得数据库账号、密码和数据集编号，不要加入 Git。公网直连时设置 `TDX_RESEARCH_HOST=111.91.25.20`、`TDX_RESEARCH_PORT=4235`；原有本机 `3306` 映射与 SSH 隧道继续可用：
 
 ```bash
 ssh -N -L 13306:127.0.0.1:3306 research-share@111.91.25.20
 ```
 
-另一个终端设置 `TDX_RESEARCH_USER` 和 `TDX_RESEARCH_PASSWORD_FILE`（只含密码，权限 `0600`）；默认连接 `127.0.0.1:13306`。随后运行：
+另一个终端设置 `TDX_RESEARCH_USER` 和 `TDX_RESEARCH_PASSWORD_FILE`（只含密码，权限 `0600`）；隧道模式默认连接 `127.0.0.1:13306`。随后运行：
 
 ```bash
 python tools/shared_research.py list

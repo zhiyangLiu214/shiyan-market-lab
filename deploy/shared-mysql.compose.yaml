@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:3306:3306"
+      - "0.0.0.0:4235:3306"
     volumes:
       - /app/.runtime/shared-mysql/data:/var/lib/mysql
       - /app/.runtime/shared-mysql/secrets/root-password:/run/secrets/mysql-root:ro
