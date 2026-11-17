@@ -34,6 +34,7 @@ htmlcov/
 /research/*
 !/research/data-source-setup.md
 !/research/limit-entry-validation.md
+!/research/auction-entry-study.md
 !/research/yeren_tech_catalog.json
 *.mp3
 *.mp4
