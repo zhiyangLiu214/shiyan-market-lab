@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime,timedelta
 from unittest.mock import Mock,patch
 
 import pandas as pd
@@ -8,7 +8,7 @@ import requests
 from flask import Flask
 
 from terminal_engine import TZ,demo_history
-from terminal_quotes import QuoteRouter
+from terminal_quotes import QuoteRouter,InsufficientDailyError,NoCurrentDailyError
 from terminal_strategy_sim import StrategyEngine,checked_config
 
 
@@ -49,6 +49,47 @@ class AdjustedQuoteTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):router.fetch('daily_qfq','600001')
         router._tdx.assert_not_called()
 
+    def test_market_scan_date_rejects_stale_primary_and_uses_current_backup(self):
+        today=datetime.now(TZ).date()
+        def frame(end):
+            dates=pd.date_range(end=end,periods=40)
+            return pd.DataFrame(dict(date=dates,open=10.,high=10.1,low=9.9,
+                                     close=10.,volume=10000.))
+        router=QuoteRouter()
+        router._em=Mock(return_value=frame(today-timedelta(days=1)))
+        router._tencent=Mock(return_value=frame(today))
+        result=router.fetch('daily_qfq','600001',required_date=today.isoformat())
+        self.assertEqual(result.attrs['provider'],'tencent')
+        self.assertTrue(result.attrs['source_fallback'])
+        self.assertIn('日线最新日期为',result.attrs['source_errors'][0])
+
+    def test_one_qfq_http_501_does_not_black_out_other_symbols(self):
+        response=Mock(status_code=501)
+        error=requests.HTTPError(response=response)
+        router=QuoteRouter()
+        router._em=Mock(side_effect=error)
+        router._tencent=Mock(return_value=demo_history('000001'))
+        router.fetch('daily_qfq','600001')
+        router.fetch('daily_qfq','600002')
+        self.assertEqual(router._em.call_count,2)
+
+    def test_two_sources_with_same_old_date_mark_missing_current_bar(self):
+        old=datetime.now(TZ).date()-timedelta(days=4)
+        dates=pd.date_range(end=old,periods=40)
+        frame=pd.DataFrame(dict(date=dates,open=10.,high=10.1,low=9.9,close=10.,volume=10000.))
+        router=QuoteRouter();router._em=Mock(return_value=frame);router._tencent=Mock(return_value=frame)
+        with self.assertRaises(NoCurrentDailyError):
+            router.fetch('daily_qfq','600001',required_date=datetime.now(TZ).date().isoformat())
+
+    def test_current_short_history_is_explicit_exclusion(self):
+        today=datetime.now(TZ).date()
+        dates=pd.date_range(end=today,periods=30)
+        frame=pd.DataFrame(dict(date=dates,open=10.,high=10.1,low=9.9,close=10.,volume=10000.))
+        router=QuoteRouter();router._em=Mock(return_value=frame)
+        router._tencent=Mock(side_effect=ValueError('缺少前复权日线'))
+        with self.assertRaisesRegex(InsufficientDailyError,'仅30根'):
+            router.fetch('daily_qfq','600001',required_date=today.isoformat())
+
 
 class FormulaPriceSeparationTests(unittest.TestCase):
     def readers(self,tmp,offline=False):
@@ -61,7 +102,7 @@ class FormulaPriceSeparationTests(unittest.TestCase):
         adjusted=raw.copy();adjusted.loc[:498,['open','high','low','close']]/=2
         adjusted.attrs.update(source='前复权价格',adjustment='qfq',retrieved_at=now.strftime('%Y-%m-%d %H:%M:%S'))
         stamp=dates[-1].strftime('%Y-%m-%d')
-        def fetch(kind,code):
+        def fetch(kind,code,required_date=None):
             if kind=='daily_qfq':
                 if offline:raise RuntimeError('offline')
                 return adjusted.copy()
@@ -79,13 +120,15 @@ class FormulaPriceSeparationTests(unittest.TestCase):
             with patch('terminal_api.datetime',wraps=datetime) as dt:
                 dt.now.return_value=now
                 q=read('600001','live',dict(name='测试股票'))
-            scanned=daily('600001','live',dict(name='测试股票'))
+            with patch('terminal_api.paper_clock',return_value='2026-11-13 15:02:00'):
+                scanned=daily('600001','live',dict(name='测试股票'))
         self.assertTrue(q['valid']);self.assertEqual(q['price'],10.);self.assertEqual(q['prev_close'],18.)
         self.assertEqual(q['daily']['bars'][-2]['close'],18.)
         self.assertEqual(q['daily']['formula_bars'][-2]['close'],9.)
         self.assertEqual(q['daily']['formula_bars'],scanned['bars']);self.assertEqual(len(scanned['bars']),500)
         self.assertEqual(scanned['adjustment'],'qfq')
-        self.assertEqual(router.fetch.call_args_list.count(unittest.mock.call('daily_qfq','600001')),1)
+        self.assertIn(unittest.mock.call('daily_qfq','600001',required_date='2026-11-13'),
+                      router.fetch.call_args_list)
         item=dict(mode='live',config=checked_config(dict(name='测试',formula='C>REF(C,1)',pool='custom',codes=['600001'])))
         result=StrategyEngine(None,None,None)._assessment(dict(code='600001',name='测试股票'),q,item)
         self.assertTrue(result['matched']);self.assertEqual(result['source'],'前复权价格')

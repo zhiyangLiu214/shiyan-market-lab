@@ -65,13 +65,14 @@ def register_terminal(app, load_boards, load_board_stocks):
     mainline = MainlineService(funds)
     fund_router=MarketRouter(mainline,quotes)
 
-    def history(code,adjustment='none'):
-        revision=quotes.revision;key=(code,revision,adjustment)
+    def history(code,adjustment='none',required_date=None):
+        revision=quotes.revision;key=(code,revision,adjustment,required_date)
         with lock:
             entry = history_cache.get(key)
         if entry and time.time() - entry[0] < 25:
             return entry[1].copy()
-        data=quotes.fetch('daily_qfq' if adjustment=='qfq' else 'daily',code)
+        kind='daily_qfq' if adjustment=='qfq' else 'daily'
+        data=quotes.fetch(kind,code,required_date=required_date) if required_date else quotes.fetch(kind,code)
         with lock:
             if len(history_cache) > 256:
                 history_cache.clear()
@@ -415,8 +416,8 @@ def register_terminal(app, load_boards, load_board_stocks):
         return dict(ready=ready,items=items,reason='已确认主线/趋势的角色候选' if ready else '主线候选数据尚未完整确认')
 
     strategy_store=StrategyStore(Path(app.root_path)/'.runtime'/'strategy-sim')
-    def strategy_formula_daily(code):
-        frame=history(code,'qfq')
+    def strategy_formula_daily(code,required_date=None):
+        frame=history(code,'qfq',required_date=required_date)
         if frame.attrs.get('adjustment')!='qfq':raise ValueError('前复权口径未确认')
         data=normalize_bars(frame).tail(500);rows=[]
         for _,bar in data.iterrows():
@@ -454,9 +455,10 @@ def register_terminal(app, load_boards, load_board_stocks):
                     daily=dict(daily,bars=rows,source=frame.attrs.get('source',daily.get('source')),
                                formula_bars=formula['bars'],formula_source=formula['source'],formula_adjustment=formula['adjustment'],formula_error=formula.get('error')))
     def strategy_daily(code,mode,meta):
-        return strategy_formula_daily(code)
+        return strategy_formula_daily(code,required_date=paper_clock()[:10])
     entry_filters=EntryFilterService(Path(app.root_path)/'.runtime'/'strategy-entry')
-    strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily,entry_reader=entry_filters.evaluate)
+    strategy_market_scan=StrategyMarketScan(StockUniverse(),strategy_daily,entry_reader=entry_filters.evaluate,
+                                            cohort_reader=lambda:strategy_store.list('live'))
     strategy_engine=StrategyEngine(strategy_store,strategy_read,strategy_pool,strategy_market_scan,calendar=trading_sessions.load,entry_reader=entry_filters.evaluate)
     trade_notices=TradeNoticeService(paper_ledger,strategy_store)
     web_push=WebPushService(Path(app.root_path)/'.runtime'/'web-push',trade_notices)
