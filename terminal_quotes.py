@@ -17,12 +17,29 @@ DEFAULT_PREFERRED = 'em'
 LABELS = {'em':'AKShare · 东方财富', 'tencent':'腾讯行情', 'tushare':'Tushare', 'tdx':'通达信普通行情'}
 
 
+class StaleDailyError(ValueError):
+    def __init__(self,latest_date,required_date):
+        self.latest_date=latest_date
+        super().__init__('日线最新日期为'+latest_date+'，需要'+required_date)
+
+
+class NoCurrentDailyError(RuntimeError):
+    pass
+
+
+class InsufficientDailyError(ValueError):
+    def __init__(self,count):
+        self.count=count
+        super().__init__('前复权日线仅'+str(count)+'根，不足35根')
+
+
 def symbol(code):
     validate_code(code)
     return ('sh' if code.startswith('6') else 'bj' if code[0] in '489' else 'sz')+code
 
 
 def failure(exc):
+    if isinstance(exc,StaleDailyError):return str(exc)
     if isinstance(exc,TushareError):return str(exc)
     if isinstance(exc, requests.HTTPError):
         return 'HTTP '+str(exc.response.status_code if exc.response is not None else '错误')
@@ -58,7 +75,7 @@ class QuoteRouter:
         with self.lock:return dict(preferred=self.preferred,funds_preferred=self.funds_preferred, revision=self.revision, providers=[dict(channel=k[0],provider=k[1],name=LABELS.get(k[1],{'dxx':'短线侠','ths':'同花顺'}.get(k[1],k[1])),**v) for k,v in self.states.items()],
                                    connections=[connection,dict(provider='qmt',name='QMT／迅投',status='unconfigured',configured=False,reason='待确认客户端与数据权限；尚未接入采集端')])
 
-    def fetch(self, kind, code):
+    def fetch(self, kind, code, required_date=None):
         validate_code(code)
         if kind not in ('daily','daily_qfq','minute'):raise ValueError('无效行情类型')
         daily=kind in ('daily','daily_qfq')
@@ -70,6 +87,7 @@ class QuoteRouter:
         if preferred in order: order.remove(preferred);order.insert(0,preferred)
         errors=([LABELS[preferred]+'：当前适配未提供前复权，已回退前复权来源'] if kind=='daily_qfq' and preferred in ('tdx','tushare') else
                 ['Tushare：未配置，已回退其他来源'] if preferred=='tushare' and preferred not in order else [])
+        stale_dates=[];short_bars=[]
         for provider in order:
             key=(kind,provider)
             with self.lock:
@@ -79,8 +97,10 @@ class QuoteRouter:
                 frame=getattr(self, '_'+provider)(kind,code)
                 if daily:
                     checked=normalize_bars(frame)
-                    if len(checked)<35:raise ValueError('日线不足35根')
                     if checked.date.max().date()>datetime.now(TZ).date():raise ValueError('未来日期')
+                    if required_date and checked.date.max().strftime('%Y-%m-%d')!=required_date:
+                        raise StaleDailyError(checked.date.max().strftime('%Y-%m-%d'),required_date)
+                    if len(checked)<35:raise InsufficientDailyError(len(checked))
                     data=frame
                 else:
                     data=intraday_analysis(frame,code)
@@ -95,10 +115,17 @@ class QuoteRouter:
                     self.until.pop(key,None);self.states[key]=dict(status='ok',at=now_text(),code=code,reason='已切至备用' if errors else '正常')
                 return data
             except Exception as exc:
+                if isinstance(exc,StaleDailyError):stale_dates.append(exc.latest_date)
+                if isinstance(exc,InsufficientDailyError):short_bars.append(exc.count)
                 reason=failure(exc);errors.append(LABELS[provider]+'：'+reason)
                 with self.lock:
-                    cooldown_key=key if isinstance(exc,(requests.Timeout,requests.ConnectionError,ImportError,TushareError)) or isinstance(exc,requests.HTTPError) and exc.response is not None and exc.response.status_code>=500 or provider=='tdx' and code[0] not in '489' else (kind,provider,code)
+                    # A single intraday qfq 5xx/timeout must not black out every
+                    # remaining symbol in a full-market formula scan.
+                    cooldown_key=key if kind!='daily_qfq' and (isinstance(exc,(requests.Timeout,requests.ConnectionError,ImportError,TushareError)) or isinstance(exc,requests.HTTPError) and exc.response is not None and exc.response.status_code>=500 or provider=='tdx' and code[0] not in '489') else (kind,provider,code)
                     self.until[cooldown_key]=time.monotonic()+120;self.states[key]=dict(status='unavailable',at=now_text(),code=code,reason=reason)
+        if required_date and kind=='daily_qfq' and len(stale_dates)==len(order) and len(set(stale_dates))==1:
+            raise NoCurrentDailyError('两个前复权源均无'+required_date+'日线，最近交易日为'+stale_dates[0])
+        if short_bars and kind=='daily_qfq':raise InsufficientDailyError(max(short_bars))
         raise RuntimeError('行情源均不可用；'+'；'.join(errors))
 
     def _tushare(self,kind,code):

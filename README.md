@@ -50,6 +50,7 @@ Tushare 已提供可选适配，需要自行配置 Token 并验证相应权限�
 - [开发约定](docs/development.md)
 - [开发任务与验证进度](TASKS.md)
 - [连板分类研究与冻结验证](research/limit-entry-validation.md)
+- [一进二、二进三找票与多种入场方式](research/auction-entry-study.md)
 
 ## 测试
 

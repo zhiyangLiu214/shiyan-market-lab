@@ -33,6 +33,9 @@ htmlcov/
 /research/*
 !/research/data-source-setup.md
 !/research/limit-entry-validation.md
+!/research/auction-entry-study.md
+!/research/preboard-44-cases.md
+!/research/bottom-reversal-method.md
 !/research/yeren_tech_catalog.json
 *.mp3
 *.mp4
